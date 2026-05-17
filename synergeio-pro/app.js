@@ -265,149 +265,110 @@
   //  DASHBOARD
   // =========================================================
   async function renderDashboard() {
-    const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const servicesThisMonth = state.services.filter((s) => new Date(s.date) >= monthStart);
-    const revenueThisMonth = servicesThisMonth.reduce((sum, s) => {
-      const p = (s.parts || []).reduce((x, p) => x + (Number(p.qty) || 0) * (Number(p.price) || 0), 0);
-      const l = (Number(s.laborHours) || 0) * (Number(s.laborRate) || 0);
-      return sum + p + l;
-    }, 0);
-
-    // reminders
-    const reminders = state.vehicles
-      .map((v) => ({ v, ...U.reminderStatus(v, servicesForVehicle(v.id), state.settings) }))
-      .filter((r) => r.status === 'upcoming' || r.status === 'overdue')
-      .sort((a, b) => (a.days || 999) - (b.days || 999));
-
-    const recent = state.services.slice().sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 5);
-
     $('#view').innerHTML = `
-      <div class="max-w-5xl mx-auto p-4 pb-24 sm:pb-4">
-        <div class="flex items-center justify-between mb-4">
+      <div class="min-h-screen flex flex-col">
+        <!-- Top bar -->
+        <div class="flex items-center justify-between px-4 pt-4 pb-2 sm:px-8 sm:pt-6">
           <div>
-            <div class="text-sm text-slate-500 dark:text-slate-400">${t('dashboard_welcome')}</div>
-            <div class="text-2xl font-bold">${U.escape(state.settings.workshopName || t('app_name'))}</div>
+            <div class="text-xs text-slate-400">${t('dashboard_welcome')}</div>
+            <div class="text-lg font-bold leading-tight">${U.escape(state.settings.workshopName || t('app_name'))}</div>
           </div>
-          <button onclick="location.hash='#/settings'" class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800">${icon('settings')}</button>
+          <button onclick="go('/settings')" class="p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400">
+            ${icon('settings','w-5 h-5')}
+          </button>
         </div>
 
-        <!-- Plate search hero -->
-        <div class="bg-slate-900 dark:bg-slate-800 rounded-2xl p-4 mb-5 shadow-lg">
-          <div class="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-1.5">
-            ${icon('search','w-3.5 h-3.5')} ${t('plate_search_title')}
-          </div>
-          <div class="flex gap-2">
-            <div class="relative flex-1">
+        <!-- Hero plate search — vertically centered -->
+        <div class="flex-1 flex flex-col items-center justify-center px-4 pb-24 sm:pb-12">
+          <div class="w-full max-w-sm">
+
+            <!-- Icon + title -->
+            <div class="text-center mb-7">
+              <div class="w-20 h-20 bg-orange-500 rounded-3xl flex items-center justify-center mx-auto mb-4 shadow-xl shadow-orange-500/30">
+                ${icon('search','w-10 h-10 text-white')}
+              </div>
+              <h1 class="text-2xl font-bold">${t('plate_search_title')}</h1>
+              <p class="text-sm text-slate-400 dark:text-slate-500 mt-1">${t('plate_search_subtitle')}</p>
+            </div>
+
+            <!-- Search card -->
+            <div class="bg-slate-900 dark:bg-slate-800 rounded-3xl p-5 shadow-2xl">
+              <!-- Plate input -->
               <input id="dash-plate" type="text" inputmode="text" autocomplete="off" spellcheck="false"
                 placeholder="${t('plate_search_placeholder')}"
-                class="w-full px-4 py-3.5 rounded-xl text-xl font-bold tracking-widest uppercase text-center bg-white dark:bg-slate-700 text-slate-900 dark:text-white placeholder-slate-300 dark:placeholder-slate-500 border-0 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                class="w-full px-4 py-4 rounded-2xl text-3xl font-bold tracking-widest uppercase text-center bg-white dark:bg-slate-700 text-slate-900 dark:text-white placeholder-slate-300 dark:placeholder-slate-500 border-0 focus:outline-none focus:ring-2 focus:ring-orange-500 mb-4"
                 maxlength="12" />
+
+              <!-- Action buttons row -->
+              <div class="grid grid-cols-3 gap-2">
+                <!-- Mic -->
+                ${micBtn('dash-plate', { transform: 'plate', cls: 'w-full h-12 rounded-2xl bg-slate-700 text-slate-300 hover:bg-red-500 hover:text-white' })}
+
+                <!-- Camera → plate OCR -->
+                <button id="dash-plate-cam" class="h-12 flex items-center justify-center gap-1.5 rounded-2xl bg-purple-600 hover:bg-purple-700 text-white font-medium text-sm transition-colors" title="${t('plate_photo_btn')}">
+                  ${icon('camera','w-5 h-5')} <span>${t('plate_photo_btn')}</span>
+                </button>
+
+                <!-- Search -->
+                <button id="dash-plate-btn" class="h-12 flex items-center justify-center gap-1.5 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-medium text-sm transition-colors">
+                  ${icon('arrow-right','w-5 h-5')} <span>${t('plate_search_btn')}</span>
+                </button>
+              </div>
+
+              <!-- Hidden file input for plate photo -->
+              <input type="file" id="dash-plate-file" accept="image/*" capture="environment" class="hidden" />
+
+              <!-- Result -->
+              <div id="dash-plate-result" class="mt-4 empty:hidden"></div>
             </div>
-            ${micBtn('dash-plate', { transform: 'plate', cls: 'bg-slate-700 text-slate-300 hover:bg-red-500 hover:text-white' })}
-            <button id="dash-plate-cam" class="w-[52px] h-[52px] flex items-center justify-center rounded-xl bg-purple-600 hover:bg-purple-700 text-white flex-shrink-0" title="Σκανάρισμα AI">
-              ${icon('scan-line','w-5 h-5')}
-            </button>
-            <button id="dash-plate-btn" class="w-[52px] h-[52px] flex items-center justify-center rounded-xl bg-orange-500 hover:bg-orange-600 text-white flex-shrink-0">
-              ${icon('arrow-right','w-5 h-5')}
-            </button>
+
           </div>
-          <div id="dash-plate-result" class="mt-3 empty:hidden"></div>
         </div>
-
-        <!-- Stats -->
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-          ${statCard('users', state.customers.length, t('stat_customers'), '#/customers', 'orange')}
-          ${statCard('car', state.vehicles.length, t('stat_vehicles'), '#/vehicles', 'indigo')}
-          ${statCard('wrench', servicesThisMonth.length, t('stat_services_month'), '#/services', 'emerald')}
-          ${statCard('bell', reminders.length, t('stat_reminders'), '#/reminders', reminders.some(r=>r.status==='overdue') ? 'red' : 'amber')}
-        </div>
-
-        <!-- Revenue card -->
-        <div class="bg-gradient-to-br from-orange-500 to-orange-700 text-white rounded-2xl p-5 mb-6 shadow-lg">
-          <div class="text-sm opacity-90">${t('stat_revenue_month')}</div>
-          <div class="text-3xl font-bold mt-1">${U.fmtMoney(revenueThisMonth, state.settings.currency)}</div>
-          <div class="text-xs mt-1 opacity-80">${servicesThisMonth.length} service</div>
-        </div>
-
-        <!-- Quick actions -->
-        <h2 class="text-sm font-semibold text-slate-500 dark:text-slate-400 mb-2 uppercase tracking-wide">${t('quick_actions')}</h2>
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-          ${qaCard('user-plus', t('qa_new_customer'), '#/customers/new', 'orange')}
-          ${qaCard('plus-circle', t('qa_new_vehicle'), '#/vehicles/new', 'indigo')}
-          ${qaCard('wrench', t('qa_new_service'), '#/services/new', 'emerald')}
-          ${qaCard('scan-line', t('qa_scan_doc'), '#/scan', 'purple')}
-        </div>
-
-        <!-- Upcoming reminders -->
-        ${reminders.length ? `
-          <div class="mb-6">
-            <div class="flex items-center justify-between mb-2">
-              <h2 class="text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">${t('upcoming_reminders')}</h2>
-              <a href="#/reminders" class="text-xs text-orange-600 dark:text-orange-400">${t('open')} →</a>
-            </div>
-            <div class="space-y-2">
-              ${reminders.slice(0, 5).map(reminderRow).join('')}
-            </div>
-          </div>
-        ` : ''}
-
-        <!-- Recent services -->
-        ${recent.length ? `
-          <div class="mb-6">
-            <div class="flex items-center justify-between mb-2">
-              <h2 class="text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">${t('recent_services')}</h2>
-              <a href="#/services" class="text-xs text-orange-600 dark:text-orange-400">${t('open')} →</a>
-            </div>
-            <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-700 overflow-hidden">
-              ${recent.map(serviceRow).join('')}
-            </div>
-          </div>
-        ` : ''}
       </div>
     `;
     refreshIcons();
 
-    // Plate search logic
+    // ---------- plate lookup ----------
     function plateLookup() {
-      const raw = $('#dash-plate')?.value.trim().toUpperCase().replace(/[\s\-]/g, '');
+      const raw = ($('#dash-plate')?.value || '').trim().toUpperCase().replace(/[\s\-]/g, '');
       if (!raw) return;
       const result = $('#dash-plate-result');
       const v = state.vehicles.find((x) => (x.plate || '').toUpperCase().replace(/[\s\-]/g, '') === raw);
       if (v) {
         const c = customerById(v.customerId);
         const lastSvc = servicesForVehicle(v.id).sort((a, b) => new Date(b.date) - new Date(a.date))[0];
-        const activeJOs = state.jobOrders.filter((j) => j.vehicleId === v.id && j.status !== 'completed').length;
+        const activeJOs = (state.jobOrders || []).filter((j) => j.vehicleId === v.id && j.status !== 'completed').length;
         result.innerHTML = `
-          <div class="bg-white dark:bg-slate-700 rounded-xl p-3 flex items-center gap-3">
-            <div class="w-12 h-12 rounded-xl bg-orange-100 dark:bg-orange-900/40 text-orange-600 dark:text-orange-300 flex items-center justify-center flex-shrink-0">
+          <div class="bg-white/10 rounded-2xl p-3 flex items-center gap-3">
+            <div class="w-12 h-12 rounded-xl bg-orange-500/20 text-orange-400 flex items-center justify-center flex-shrink-0">
               ${icon(vehicleIcon(v.type || 'car'), 'w-6 h-6')}
             </div>
             <div class="flex-1 min-w-0">
-              <div class="font-bold text-sm text-white dark:text-white">${U.escape(v.brand || '')} ${U.escape(v.model || '')} <span class="text-slate-400 font-normal">${v.year || ''}</span></div>
-              ${c ? `<div class="text-xs text-slate-300 dark:text-slate-300 truncate">${U.escape(c.name)}</div>` : ''}
+              <div class="font-bold text-sm text-white">${U.escape(v.brand || '')} ${U.escape(v.model || '')} <span class="text-slate-400 font-normal text-xs">${v.year || ''}</span></div>
+              ${c ? `<div class="text-xs text-slate-300 truncate">${U.escape(c.name)}</div>` : ''}
               ${lastSvc ? `<div class="text-xs text-slate-400">τελ. service: ${U.fmtDate(lastSvc.date)}</div>` : ''}
-              ${activeJOs ? `<div class="text-xs text-amber-400">${activeJOs} ${t('plate_active_orders')}</div>` : ''}
+              ${activeJOs ? `<div class="text-xs text-amber-400 font-medium">${activeJOs} ${t('plate_active_orders')}</div>` : ''}
             </div>
-            <div class="flex flex-col gap-1.5 flex-shrink-0">
-              <button onclick="go('/job-orders/new?vehicle=${v.id}')" class="bg-orange-500 hover:bg-orange-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1">
-                ${icon('plus','w-3.5 h-3.5')} ${t('plate_new_order')}
-              </button>
-              <button onclick="go('/vehicles/${v.id}')" class="bg-slate-600 hover:bg-slate-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1">
-                ${icon('history','w-3.5 h-3.5')} ${t('plate_history')}
-              </button>
-            </div>
+          </div>
+          <div class="flex flex-col gap-2 mt-2">
+            <button onclick="go('/job-orders/new?vehicle=${v.id}')" class="w-full bg-orange-500 hover:bg-orange-600 text-white font-semibold py-3 rounded-2xl flex items-center justify-center gap-2 transition-colors">
+              ${icon('plus','w-4 h-4')} ${t('plate_new_order')}
+            </button>
+            <button onclick="go('/vehicles/${v.id}')" class="w-full bg-white/10 hover:bg-white/20 text-white font-medium py-2.5 rounded-2xl flex items-center justify-center gap-2 transition-colors text-sm">
+              ${icon('history','w-4 h-4')} ${t('plate_history')}
+            </button>
           </div>`;
       } else {
         result.innerHTML = `
-          <div class="text-center py-2">
-            <p class="text-slate-400 text-xs mb-2">${t('plate_not_found')}: <span class="font-bold text-white">${U.escape(raw)}</span></p>
-            <div class="flex gap-2 justify-center">
-              <button onclick="go('/scan')" class="bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold px-3 py-2 rounded-lg flex items-center gap-1.5">
-                ${icon('scan-line','w-3.5 h-3.5')} ${t('plate_scan_hint')}
+          <div class="text-center py-1">
+            <p class="text-slate-400 text-sm mb-1">${t('plate_not_found')}</p>
+            <p class="text-slate-500 text-xs mb-3">${t('plate_not_found_add')}</p>
+            <div class="flex flex-col gap-2">
+              <button onclick="go('/scan')" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-medium py-3 rounded-2xl flex items-center justify-center gap-2 transition-colors text-sm">
+                ${icon('scan-line','w-4 h-4')} ${t('plate_scan_hint')}
               </button>
-              <button onclick="go('/vehicles/new')" class="bg-slate-600 hover:bg-slate-500 text-white text-xs font-semibold px-3 py-2 rounded-lg flex items-center gap-1.5">
-                ${icon('plus','w-3.5 h-3.5')} ${t('plate_new_vehicle')}
+              <button onclick="go('/vehicles/new')" class="w-full bg-white/10 hover:bg-white/20 text-white font-medium py-2.5 rounded-2xl flex items-center justify-center gap-2 transition-colors text-sm">
+                ${icon('plus','w-4 h-4')} ${t('plate_new_vehicle')}
               </button>
             </div>
           </div>`;
@@ -415,16 +376,54 @@
       refreshIcons();
     }
 
+    // ---------- plate photo OCR ----------
+    async function platePhotoOCR(file) {
+      const result = $('#dash-plate-result');
+      result.innerHTML = `<div class="text-center text-slate-400 text-sm py-2 flex items-center justify-center gap-2">${icon('loader','w-4 h-4 animate-spin')} ${t('plate_reading')}</div>`;
+      refreshIcons();
+      try {
+        const dataUrl = await new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload = () => res(r.result);
+          r.onerror = rej;
+          r.readAsDataURL(file);
+        });
+        const resp = await fetch('/api/plate-ocr', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageDataUrl: dataUrl }),
+        });
+        const data = await resp.json();
+        if (data.plate) {
+          const inp = $('#dash-plate');
+          if (inp) inp.value = data.plate;
+          result.innerHTML = '';
+          plateLookup();
+        } else {
+          result.innerHTML = `<p class="text-center text-red-400 text-sm py-2">Δεν βρέθηκε πινακίδα στη φωτογραφία</p>`;
+        }
+      } catch (e) {
+        result.innerHTML = `<p class="text-center text-red-400 text-sm py-2">Σφάλμα ανάγνωσης πινακίδας</p>`;
+      }
+    }
+
+    // ---------- event wiring ----------
     const plateInput = $('#dash-plate');
     if (plateInput) {
       plateInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') plateLookup(); });
       plateInput.addEventListener('input', () => {
         plateInput.value = plateInput.value.toUpperCase();
-        if ($('#dash-plate-result')) $('#dash-plate-result').innerHTML = '';
+        const r = $('#dash-plate-result');
+        if (r) r.innerHTML = '';
       });
     }
     $('#dash-plate-btn')?.addEventListener('click', plateLookup);
-    $('#dash-plate-cam')?.addEventListener('click', () => go('/scan'));
+
+    const fileInput = $('#dash-plate-file');
+    $('#dash-plate-cam')?.addEventListener('click', () => fileInput?.click());
+    fileInput?.addEventListener('change', () => {
+      if (fileInput.files?.[0]) platePhotoOCR(fileInput.files[0]);
+    });
   }
 
   function statCard(iconName, value, label, href, color) {
