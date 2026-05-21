@@ -37,7 +37,13 @@ let state = {
     services: null,
     completionMsg: 'Αγαπητέ/ή {name}, το όχημά σας {plate} είναι έτοιμο για παραλαβή από το κατάστημά μας! Σας ευχαριστούμε!',
     thankYouMsg: 'Αγαπητέ/ή {name}, σας ευχαριστούμε θερμά για την εμπιστοσύνη σας! Θα χαρούμε να σας εξυπηρετήσουμε ξανά σύντομα!',
-    reviewUrl: ''
+    reviewUrl: '',
+    dashWidgets: {
+      activePreview: true,
+      weeklyChart: true,
+      topServices: true,
+      businessStats: true
+    }
   }
 };
 
@@ -47,6 +53,7 @@ let currentJobId = null;
 let appointments = [];
 let apptSelectedDate = new Date();
 let _apptSubscription = null;
+let _apptManualDuration = 60;
 
 // ===== INIT =====
 function init() {
@@ -61,6 +68,7 @@ function init() {
       showPage('dashboard');
       subscribeToNewBookings();
       updateApptBadge();
+      syncShopConfigToSupabase();
       if ('Notification' in window && Notification.permission === 'default') {
         Notification.requestPermission();
       }
@@ -172,15 +180,29 @@ function renderDashboard() {
   const sideBadge = document.getElementById('sideActiveBadge');
   if (sideBadge) { sideBadge.textContent = activeJobs.length; sideBadge.style.display = activeJobs.length > 0 ? 'flex' : 'none'; }
 
-  const container = document.getElementById('dashActiveJobs');
-  if (activeJobs.length === 0) {
-    container.innerHTML = `<div class="empty-state"><div class="empty-icon">🚿</div><p>Δεν υπάρχουν ενεργές εργασίες</p><button class="btn-primary" onclick="showPage('newJob')">+ Νέα Εργασία</button></div>`;
-  } else {
-    container.innerHTML = activeJobs.slice(0, 4).map(j => jobCardHTML(j)).join('');
+  const w = state.settings.dashWidgets || {};
+
+  const widgetActive = document.getElementById('dashWidgetActive');
+  if (widgetActive) widgetActive.style.display = w.activePreview !== false ? '' : 'none';
+  const widgetChart = document.getElementById('dashWidgetChart');
+  if (widgetChart) widgetChart.style.display = w.weeklyChart !== false ? '' : 'none';
+  const widgetTopSvcs = document.getElementById('dashWidgetTopSvcs');
+  if (widgetTopSvcs) widgetTopSvcs.style.display = w.topServices !== false ? '' : 'none';
+  const widgetStats = document.getElementById('dashWidgetStats');
+  if (widgetStats) widgetStats.style.display = w.businessStats !== false ? '' : 'none';
+
+  if (w.activePreview !== false) {
+    const container = document.getElementById('dashActiveJobs');
+    if (activeJobs.length === 0) {
+      container.innerHTML = `<div class="empty-state"><div class="empty-icon">🚿</div><p>Δεν υπάρχουν ενεργές εργασίες</p><button class="btn-primary" onclick="showPage('newJob')">+ Νέα Εργασία</button></div>`;
+    } else {
+      container.innerHTML = activeJobs.slice(0, 4).map(j => jobCardHTML(j)).join('');
+    }
   }
 
-  renderMiniChart();
-  renderTopServices();
+  if (w.weeklyChart !== false) renderMiniChart();
+  if (w.topServices !== false) renderTopServices();
+  if (w.businessStats !== false) renderDetailedStats('dashStatsContent');
 }
 
 function renderMiniChart() {
@@ -952,6 +974,7 @@ function saveCurrentServices() {
 function saveServices() {
   saveCurrentServices();
   saveData();
+  syncShopConfigToSupabase();
   showToast('Υπηρεσίες αποθηκεύτηκαν', 'success');
 }
 
@@ -968,6 +991,7 @@ function saveShopInfo() {
   state.settings.shopPhone = document.getElementById('shopPhone').value.trim();
   state.settings.shopAddress = document.getElementById('shopAddress').value.trim();
   saveData();
+  syncShopConfigToSupabase();
   showToast('Στοιχεία αποθηκεύτηκαν', 'success');
 }
 
@@ -988,8 +1012,8 @@ function clearHistory() {
 }
 
 // ===== DETAILED STATS =====
-function renderDetailedStats() {
-  const container = document.getElementById('statsOverall');
+function renderDetailedStats(containerId = 'statsOverall') {
+  const container = document.getElementById(containerId);
   if (!container) return;
   const now = new Date();
   const doneJobs = state.jobs.filter(j => j.status === 'done');
@@ -1056,6 +1080,164 @@ function renderDetailedStats() {
             <span class="top-svc-rev">${rev.toFixed(0)}€</span>
           </div>`).join('')}
       </div>` : ''}`;
+}
+
+// ===== DETAIL DRAWER =====
+function openDetailDrawer(title, html) {
+  document.getElementById('detailDrawerTitle').textContent = title;
+  document.getElementById('detailDrawerBody').innerHTML = html;
+  document.getElementById('detailDrawer').classList.remove('hidden');
+}
+function closeDetailDrawer() {
+  document.getElementById('detailDrawer').classList.add('hidden');
+}
+
+function drawerJobCard(job) {
+  const completed = job.tasks.filter(t => t.done).length;
+  const total = job.tasks.length;
+  const pct = total > 0 ? Math.round(completed / total * 100) : 0;
+  const statusLabel = job.status === 'done' ? '✅ Παραδόθηκε' : job.status === 'ready' ? '✅ Έτοιμο' : `${completed}/${total} εργασίες`;
+  const statusColor = job.status === 'done' ? 'var(--green)' : job.status === 'ready' ? 'var(--green)' : 'var(--orange)';
+  const dt = job.deliveredAt || job.completedAt
+    ? new Date(job.deliveredAt || job.completedAt).toLocaleTimeString('el-GR', { hour:'2-digit', minute:'2-digit' })
+    : new Date(job.createdAt).toLocaleTimeString('el-GR', { hour:'2-digit', minute:'2-digit' });
+  return `
+    <div class="drawer-job-card" onclick="closeDetailDrawer();openJobDetail('${job.id}')">
+      <div class="drawer-job-left">
+        <div class="drawer-job-plate">${job.plate}</div>
+        <div class="drawer-job-time">${dt}</div>
+      </div>
+      <div class="drawer-job-info">
+        <div class="drawer-job-name">${job.customerName}</div>
+        <div class="drawer-job-meta">${job.brand} ${job.model} · ${VEHICLE_LABELS[job.vehicleType] || ''}</div>
+        ${job.status !== 'done' ? `<div class="drawer-job-bar"><div style="height:4px;background:var(--border);border-radius:2px"><div style="height:4px;background:var(--blue);border-radius:2px;width:${pct}%"></div></div></div>` : ''}
+      </div>
+      <div class="drawer-job-right">
+        <div class="drawer-job-status" style="color:${statusColor}">${statusLabel}</div>
+        <div class="drawer-job-price">${(job.finalTotal || job.total || 0).toFixed(0)}€</div>
+      </div>
+    </div>`;
+}
+
+function showStatDetail(type) {
+  const today = new Date().toDateString();
+  const todayJobs = state.jobs.filter(j => new Date(j.createdAt).toDateString() === today);
+  const activeJobs = state.jobs.filter(j => j.status === 'active' || j.status === 'ready');
+  const doneToday = state.jobs.filter(j => j.status === 'done' && new Date(j.deliveredAt || j.createdAt).toDateString() === today);
+
+  let title, html;
+
+  if (type === 'today') {
+    title = `Σήμερα — ${todayJobs.length} εργασίες`;
+    if (todayJobs.length === 0) {
+      html = '<div class="drawer-empty">Δεν υπάρχουν εργασίες σήμερα</div>';
+    } else {
+      const sorted = [...todayJobs].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      html = sorted.map(j => drawerJobCard(j)).join('');
+    }
+  } else if (type === 'active') {
+    title = `Ενεργές — ${activeJobs.length} εργασίες`;
+    if (activeJobs.length === 0) {
+      html = '<div class="drawer-empty">Δεν υπάρχουν ενεργές εργασίες<br><button class="btn-primary" style="margin-top:12px" onclick="closeDetailDrawer();showPage(\'newJob\')">+ Νέα Εργασία</button></div>';
+    } else {
+      html = activeJobs.map(j => drawerJobCard(j)).join('');
+    }
+  } else if (type === 'done') {
+    title = `Παραδόθηκαν Σήμερα — ${doneToday.length}`;
+    if (doneToday.length === 0) {
+      html = '<div class="drawer-empty">Δεν υπάρχουν παραδόσεις σήμερα</div>';
+    } else {
+      const rev = doneToday.reduce((s, j) => s + (j.finalTotal || j.total || 0), 0);
+      html = `<div class="drawer-total-bar">Σύνολο σήμερα: <strong>${rev.toFixed(0)}€</strong></div>` + doneToday.map(j => drawerJobCard(j)).join('');
+    }
+  } else if (type === 'revenue') {
+    title = 'Ανάλυση Εσόδων';
+    html = buildRevenueDetailHTML();
+  }
+
+  openDetailDrawer(title, html);
+}
+
+function buildRevenueDetailHTML() {
+  const now = new Date();
+  const doneJobs = state.jobs.filter(j => j.status === 'done');
+  const todayStr = now.toDateString();
+  const weekAgo = new Date(now - 7 * 86400000);
+  const monthAgo = new Date(now - 30 * 86400000);
+  const todayJobs = doneJobs.filter(j => new Date(j.deliveredAt || j.createdAt).toDateString() === todayStr);
+  const weekJobs  = doneJobs.filter(j => new Date(j.deliveredAt || j.createdAt) >= weekAgo);
+  const monthJobs = doneJobs.filter(j => new Date(j.deliveredAt || j.createdAt) >= monthAgo);
+  const rev = arr => arr.reduce((s, j) => s + (j.finalTotal || j.total || 0), 0);
+  const avgTicket = doneJobs.length > 0 ? rev(doneJobs) / doneJobs.length : 0;
+
+  const plateCounts = {};
+  state.jobs.forEach(j => { plateCounts[j.plate] = (plateCounts[j.plate] || 0) + 1; });
+  const repeatCustomers = Object.values(plateCounts).filter(c => c > 1).length;
+  const totalCustomers = Object.keys(plateCounts).length;
+
+  const svcRevenue = {};
+  doneJobs.forEach(j => j.tasks.forEach(t => { svcRevenue[t.name] = (svcRevenue[t.name] || 0) + t.price; }));
+  const topSvcs = Object.entries(svcRevenue).sort((a, b) => b[1] - a[1]).slice(0, 5);
+
+  return `
+    <div class="revenue-grid">
+      <div class="rev-card"><div class="rev-label">Σήμερα</div><div class="rev-val">${rev(todayJobs).toFixed(0)}€</div><div class="rev-sub">${todayJobs.length} εργασίες</div></div>
+      <div class="rev-card"><div class="rev-label">7 Ημέρες</div><div class="rev-val">${rev(weekJobs).toFixed(0)}€</div><div class="rev-sub">${weekJobs.length} εργασίες</div></div>
+      <div class="rev-card"><div class="rev-label">30 Ημέρες</div><div class="rev-val">${rev(monthJobs).toFixed(0)}€</div><div class="rev-sub">${monthJobs.length} εργασίες</div></div>
+      <div class="rev-card"><div class="rev-label">Σύνολο</div><div class="rev-val">${rev(doneJobs).toFixed(0)}€</div><div class="rev-sub">${doneJobs.length} εργασίες</div></div>
+    </div>
+    <div class="rev-kpis">
+      <div class="rev-kpi"><span>Μέση αξία εργασίας</span><strong>${avgTicket.toFixed(0)}€</strong></div>
+      <div class="rev-kpi"><span>Επαναλαμβανόμενοι πελάτες</span><strong>${repeatCustomers} / ${totalCustomers}</strong></div>
+    </div>
+    ${topSvcs.length > 0 ? `
+      <div style="margin-top:16px">
+        <p style="font-size:0.78rem;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px">Top Υπηρεσίες (Έσοδα)</p>
+        ${topSvcs.map(([name, r]) => `
+          <div class="top-svc-item">
+            <span class="top-svc-name">${name}</span>
+            <div class="top-svc-bar-wrap"><div class="top-svc-bar" style="width:${Math.round((r/topSvcs[0][1])*100)}%"></div></div>
+            <span class="top-svc-rev">${r.toFixed(0)}€</span>
+          </div>`).join('')}
+      </div>` : ''}`;
+}
+
+// ===== DASHBOARD CUSTOMIZE =====
+const DASH_WIDGETS_CONFIG = [
+  { key: 'activePreview',  label: 'Ενεργές Εργασίες',          desc: 'Προεπισκόπηση ενεργών εργασιών' },
+  { key: 'weeklyChart',    label: 'Γράφημα Εβδομάδας',         desc: 'Έσοδα τελευταίων 7 ημερών' },
+  { key: 'topServices',    label: 'Δημοφιλείς Υπηρεσίες',      desc: 'Top υπηρεσίες βάση πλήθους' },
+  { key: 'businessStats',  label: 'Στατιστικά Επιχείρησης',    desc: 'Έσοδα ανά περίοδο, επαναλαμβανόμενοι' },
+];
+
+function openDashCustomize() {
+  document.getElementById('dashCustomizeOverlay').classList.remove('hidden');
+  renderDashCustomize();
+}
+function closeDashCustomize() {
+  document.getElementById('dashCustomizeOverlay').classList.add('hidden');
+}
+function renderDashCustomize() {
+  const container = document.getElementById('dashCustomizeList');
+  if (!container) return;
+  const w = state.settings.dashWidgets || {};
+  container.innerHTML = DASH_WIDGETS_CONFIG.map(cfg => `
+    <div class="dash-widget-row">
+      <div class="dash-widget-info">
+        <div class="dash-widget-label">${cfg.label}</div>
+        <div class="dash-widget-desc">${cfg.desc}</div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" ${w[cfg.key] !== false ? 'checked' : ''} onchange="toggleDashWidget('${cfg.key}',this.checked)">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>`).join('');
+}
+function toggleDashWidget(key, visible) {
+  if (!state.settings.dashWidgets) state.settings.dashWidgets = {};
+  state.settings.dashWidgets[key] = visible;
+  saveData();
+  renderDashboard();
 }
 
 // ===== NOTIFICATION & TOAST =====
@@ -1215,6 +1397,20 @@ function clearAdvisorChat() {
 
 function advisorInputKeydown(e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendAdvisorMessage(); }
+}
+
+// ===== SHOP CONFIG SYNC =====
+async function syncShopConfigToSupabase() {
+  const supa = getSupa();
+  if (!supa) return;
+  try {
+    await supa.from('shop_config').upsert({
+      id: 'default',
+      shop_name: state.settings.shopName || 'CarWash Pro',
+      services: state.settings.services || [],
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'id' });
+  } catch (e) {}
 }
 
 // ===== APPOINTMENTS =====

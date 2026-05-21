@@ -125,55 +125,71 @@
               <p class="dash-greeting" id="greeting"></p>
               <h2 class="dash-title">Καλώς ήρθατε!</h2>
             </div>
-            <div class="dash-day-label" id="dashDay"></div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <div class="dash-day-label" id="dashDay"></div>
+              <button class="dash-customize-btn" onclick="openDashCustomize()" title="Προσαρμογή dashboard">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+              </button>
+            </div>
           </div>
 
           <div class="stats-grid">
-            <div class="stat-card stat-blue">
+            <div class="stat-card stat-blue stat-clickable" onclick="showStatDetail('today')" title="Εργασίες σήμερα">
               <div class="stat-icon">🚗</div>
               <div class="stat-val" id="statToday">0</div>
               <div class="stat-label">Σήμερα</div>
+              <div class="stat-tap-hint">αγγίξτε για λεπτομέρειες</div>
             </div>
-            <div class="stat-card stat-orange">
+            <div class="stat-card stat-orange stat-clickable" onclick="showStatDetail('active')" title="Ενεργές εργασίες">
               <div class="stat-icon">⏳</div>
               <div class="stat-val" id="statActive">0</div>
               <div class="stat-label">Ενεργά</div>
+              <div class="stat-tap-hint">αγγίξτε για λεπτομέρειες</div>
             </div>
-            <div class="stat-card stat-green">
+            <div class="stat-card stat-green stat-clickable" onclick="showStatDetail('done')" title="Παραδόθηκαν σήμερα">
               <div class="stat-icon">✅</div>
               <div class="stat-val" id="statDone">0</div>
               <div class="stat-label">Παραδόθηκαν</div>
+              <div class="stat-tap-hint">αγγίξτε για λεπτομέρειες</div>
             </div>
-            <div class="stat-card stat-purple">
+            <div class="stat-card stat-purple stat-clickable" onclick="showStatDetail('revenue')" title="Ανάλυση εσόδων">
               <div class="stat-icon">💶</div>
               <div class="stat-val" id="statRevenue">0€</div>
               <div class="stat-label">Έσοδα Σήμερα</div>
+              <div class="stat-tap-hint">αγγίξτε για λεπτομέρειες</div>
             </div>
           </div>
 
-          <div class="section-header">
-            <h3>Ενεργές Εργασίες</h3>
-            <button class="see-all" onclick="showPage('active')">Όλες →</button>
-          </div>
-          <div id="dashActiveJobs" class="dash-jobs-list">
-            <div class="empty-state">
-              <div class="empty-icon">🚿</div>
-              <p>Δεν υπάρχουν ενεργές εργασίες</p>
-              <button class="btn-primary" onclick="showPage('newJob')">+ Νέα Εργασία</button>
+          <div id="dashWidgetActive">
+            <div class="section-header">
+              <h3>Ενεργές Εργασίες</h3>
+              <button class="see-all" onclick="showPage('active')">Όλες →</button>
             </div>
+            <div id="dashActiveJobs" class="dash-jobs-list"></div>
           </div>
 
-          <!-- 7-day chart -->
-          <div class="section-header" style="margin-top:28px">
-            <h3>Έσοδα Τελευταίων 7 Ημερών</h3>
+          <div id="dashWidgetChart">
+            <div class="section-header" style="margin-top:28px">
+              <h3>Έσοδα Τελευταίων 7 Ημερών</h3>
+            </div>
+            <div class="chart-container" id="dashChart"></div>
           </div>
-          <div class="chart-container" id="dashChart"></div>
 
-          <!-- Top services -->
-          <div class="section-header" style="margin-top:24px">
-            <h3>Δημοφιλείς Υπηρεσίες</h3>
+          <div id="dashWidgetTopSvcs">
+            <div class="section-header" style="margin-top:24px">
+              <h3>Δημοφιλείς Υπηρεσίες</h3>
+            </div>
+            <div class="top-svcs-container" id="dashTopServices"></div>
           </div>
-          <div class="top-svcs-container" id="dashTopServices"></div>
+
+          <div id="dashWidgetStats">
+            <div class="section-header" style="margin-top:24px">
+              <h3>Στατιστικά Επιχείρησης</h3>
+              <button class="see-all" onclick="showStatDetail('revenue')">Ανάλυση →</button>
+            </div>
+            <div id="dashStatsContent"></div>
+          </div>
+
         </div>
       </div>
 
@@ -620,6 +636,35 @@
   </div><!-- /main-area -->
 
 </div><!-- /app -->
+
+<!-- DETAIL DRAWER -->
+<div id="detailDrawer" class="detail-drawer hidden" onclick="if(event.target===this)closeDetailDrawer()">
+  <div class="detail-drawer-panel">
+    <div class="detail-drawer-handle"></div>
+    <div class="detail-drawer-header">
+      <h3 id="detailDrawerTitle">—</h3>
+      <button class="detail-drawer-close" onclick="closeDetailDrawer()">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="detail-drawer-body" id="detailDrawerBody"></div>
+  </div>
+</div>
+
+<!-- DASHBOARD CUSTOMIZE -->
+<div id="dashCustomizeOverlay" class="detail-drawer hidden" onclick="if(event.target===this)closeDashCustomize()">
+  <div class="detail-drawer-panel">
+    <div class="detail-drawer-handle"></div>
+    <div class="detail-drawer-header">
+      <h3>Προσαρμογή Dashboard</h3>
+      <button class="detail-drawer-close" onclick="closeDashCustomize()">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <p style="padding:0 20px 12px;font-size:0.83rem;color:var(--text2)">Επιλέξτε ποιες ενότητες θέλετε να εμφανίζονται στο dashboard σας.</p>
+    <div class="detail-drawer-body" id="dashCustomizeList"></div>
+  </div>
+</div>
 
 <!-- APPOINTMENT MODAL -->
 <div id="apptModal" class="appt-modal-overlay hidden" onclick="if(event.target===this)closeApptModal()">
