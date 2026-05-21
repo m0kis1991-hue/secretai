@@ -1028,7 +1028,7 @@ select.form-control { cursor: pointer; }
 }
 
 /* ===== AI ADVISOR ===== */
-#page-advisor { display: flex; flex-direction: column; overflow: hidden; }
+#page-advisor.active { overflow: hidden; }
 
 .advisor-page-wrap {
   display: flex; flex-direction: column;

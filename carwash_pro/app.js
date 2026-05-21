@@ -1154,7 +1154,7 @@ function renderAdvisorMessages() {
         <div class="advisor-welcome-icon">
           <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 6v6l4 2"/><circle cx="18" cy="6" r="4" fill="var(--blue)" stroke="none"/><text x="16" y="9" font-size="5" fill="white" font-weight="bold">AI</text></svg>
         </div>
-        <p><strong>Γεια σας!</strong> Είμαι ο AI επιχειρηματικός σύμβουλός σας.</p>
+        <p><strong>Γεια σας!</strong> Είμαι ο σύμβουλος επιχείρησής σας.</p>
         <p>Έχω πρόσβαση στα δεδομένα της επιχείρησής σας και μπορώ να αναλύσω τις υπηρεσίες σας, τα έσοδα και τους πελάτες σας για να σας δώσω <strong>εξατομικευμένες συμβουλές</strong>.</p>
       </div>`;
     return;
