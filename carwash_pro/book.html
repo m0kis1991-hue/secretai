@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Κράτηση Ραντεβού</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 16px; -webkit-text-size-adjust: 100%; }
+body {
+  font-family: 'DM Sans', sans-serif;
+  background: #F0F4F8;
+  color: #1E293B;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+.book-header {
+  background: linear-gradient(160deg, #0F4C81 0%, #0a2f52 100%);
+  color: white;
+  padding: 28px 20px 24px;
+  text-align: center;
+}
+.book-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.book-title {
+  font-family: 'Syne', sans-serif;
+  font-weight: 800;
+  font-size: 1.35rem;
+}
+.book-sub {
+  font-size: 0.88rem;
+  opacity: 0.8;
+  margin-top: 4px;
+}
+
+.book-body {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 20px 16px 40px;
+}
+
+.step {
+  display: none;
+}
+.step.active {
+  display: block;
+  animation: fadeUp 0.25s ease;
+}
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.step-title {
+  font-family: 'Syne', sans-serif;
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: #0F4C81;
+  margin-bottom: 16px;
+}
+
+/* Date picker */
+.date-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 20px;
+}
+.date-btn {
+  background: white;
+  border: 2px solid #E2E8F0;
+  border-radius: 10px;
+  padding: 10px 6px;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.15s;
+}
+.date-btn:hover { border-color: #0F4C81; }
+.date-btn.selected { background: #0F4C81; border-color: #0F4C81; color: white; }
+.date-btn .day-name { font-size: 0.72rem; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.5px; }
+.date-btn .day-num { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 1.1rem; }
+.date-btn .month-name { font-size: 0.72rem; opacity: 0.7; }
+
+/* Time slots */
+.slots-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 20px;
+}
+.slot-btn {
+  background: white;
+  border: 2px solid #E2E8F0;
+  border-radius: 10px;
+  padding: 14px 8px;
+  cursor: pointer;
+  text-align: center;
+  font-family: 'Syne', sans-serif;
+  font-weight: 700;
+  font-size: 1rem;
+  color: #0F4C81;
+  transition: all 0.15s;
+}
+.slot-btn:hover:not(.booked) { border-color: #0F4C81; background: #f0f7ff; }
+.slot-btn.selected { background: #0F4C81; border-color: #0F4C81; color: white; }
+.slot-btn.booked { background: #F8FAFC; border-color: #E2E8F0; color: #94A3B8; cursor: not-allowed; text-decoration: line-through; }
+
+/* Form */
+.form-group { margin-bottom: 14px; }
+.form-group label {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #64748B;
+  margin-bottom: 5px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.form-control {
+  width: 100%;
+  background: white;
+  border: 1.5px solid #E2E8F0;
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 0.95rem;
+  color: #1E293B;
+  font-family: 'DM Sans', sans-serif;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.form-control:focus { border-color: #0F4C81; box-shadow: 0 0 0 3px rgba(15,76,129,0.1); }
+
+/* Summary card */
+.summary-card {
+  background: white;
+  border-radius: 14px;
+  padding: 18px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 12px rgba(15,76,129,0.08);
+}
+.summary-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  font-size: 0.88rem;
+  border-bottom: 1px solid #F0F4F8;
+}
+.summary-row:last-child { border-bottom: none; }
+.summary-row strong { color: #1E293B; }
+
+/* Buttons */
+.btn-primary {
+  display: block;
+  width: 100%;
+  background: #0F4C81;
+  color: white;
+  border: none;
+  border-radius: 12px;
+  padding: 15px;
+  font-size: 1rem;
+  font-weight: 700;
+  font-family: 'Syne', sans-serif;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.12s;
+}
+.btn-primary:hover { background: #1a6ab5; transform: translateY(-1px); }
+.btn-primary:disabled { background: #94A3B8; cursor: not-allowed; transform: none; }
+
+.btn-secondary {
+  display: block;
+  width: 100%;
+  background: white;
+  color: #0F4C81;
+  border: 2px solid #0F4C81;
+  border-radius: 12px;
+  padding: 13px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-family: 'DM Sans', sans-serif;
+  cursor: pointer;
+  margin-top: 10px;
+  transition: background 0.15s;
+}
+.btn-secondary:hover { background: #f0f7ff; }
+
+.step-nav {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+.step-nav .btn-primary { flex: 2; margin: 0; }
+.step-nav .btn-secondary { flex: 1; margin: 0; width: auto; display: flex; align-items: center; justify-content: center; }
+
+/* Progress dots */
+.progress-dots {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+.progress-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: #E2E8F0;
+  transition: all 0.2s;
+}
+.progress-dot.active { background: #0F4C81; width: 20px; border-radius: 4px; }
+.progress-dot.done { background: #00C47A; }
+
+/* Loading */
+.loading-slots {
+  text-align: center;
+  padding: 30px;
+  color: #64748B;
+}
+.spinner {
+  width: 32px; height: 32px;
+  border: 3px solid #E2E8F0;
+  border-top-color: #0F4C81;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  margin: 0 auto 12px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Success */
+.success-view {
+  text-align: center;
+  padding: 30px 20px;
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 2px 12px rgba(15,76,129,0.08);
+}
+.success-icon {
+  font-size: 3rem;
+  margin-bottom: 16px;
+}
+.success-title {
+  font-family: 'Syne', sans-serif;
+  font-weight: 800;
+  font-size: 1.3rem;
+  color: #00C47A;
+  margin-bottom: 8px;
+}
+.success-sub {
+  color: #64748B;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  margin-bottom: 20px;
+}
+.success-detail {
+  background: #F0F4F8;
+  border-radius: 10px;
+  padding: 14px;
+  margin-bottom: 20px;
+  text-align: left;
+}
+.success-detail-row {
+  display: flex;
+  gap: 8px;
+  font-size: 0.88rem;
+  padding: 4px 0;
+}
+.success-detail-label { color: #64748B; min-width: 80px; }
+.success-detail-val { font-weight: 600; color: #1E293B; }
+</style>
+</head>
+<body>
+
+<div class="book-header">
+  <div class="book-logo">
+    <svg width="32" height="32" viewBox="0 0 64 64" fill="none">
+      <circle cx="32" cy="32" r="30" fill="rgba(255,255,255,0.15)"/>
+      <path d="M16 38 Q32 22 48 38" stroke="#00C2FF" stroke-width="3" fill="none" stroke-linecap="round"/>
+      <rect x="22" y="28" width="20" height="10" rx="3" fill="white" opacity="0.9"/>
+      <rect x="24" y="24" width="16" height="6" rx="2" fill="white" opacity="0.7"/>
+    </svg>
+    <span class="book-title">CarWash Pro</span>
+  </div>
+  <div class="book-sub">Κλείστε ραντεβού online — γρήγορα και εύκολα</div>
+</div>
+
+<div class="book-body">
+
+  <div class="progress-dots">
+    <div class="progress-dot active" id="dot1"></div>
+    <div class="progress-dot" id="dot2"></div>
+    <div class="progress-dot" id="dot3"></div>
+    <div class="progress-dot" id="dot4"></div>
+  </div>
+
+  <!-- Step 1: Pick date -->
+  <div class="step active" id="step1">
+    <div class="step-title">Επιλέξτε Ημερομηνία</div>
+    <div class="date-grid" id="dateGrid"></div>
+    <button class="btn-primary" onclick="goStep2()" id="btnStep1">Επόμενο →</button>
+  </div>
+
+  <!-- Step 2: Pick time -->
+  <div class="step" id="step2">
+    <div class="step-title">Επιλέξτε Ώρα</div>
+    <div id="slotsContainer">
+      <div class="loading-slots"><div class="spinner"></div>Φόρτωση διαθέσιμων ωρών...</div>
+    </div>
+    <div class="step-nav">
+      <button class="btn-secondary" onclick="showStep(1)">← Πίσω</button>
+      <button class="btn-primary" onclick="goStep3()" id="btnStep2">Επόμενο →</button>
+    </div>
+  </div>
+
+  <!-- Step 3: Fill info -->
+  <div class="step" id="step3">
+    <div class="step-title">Στοιχεία Επικοινωνίας</div>
+    <div class="form-group">
+      <label>Ονοματεπώνυμο</label>
+      <input type="text" id="bookName" class="form-control" placeholder="Γιώργης Παπαδόπουλος" autocomplete="name">
+    </div>
+    <div class="form-group">
+      <label>Τηλέφωνο</label>
+      <input type="tel" id="bookPhone" class="form-control" placeholder="69XXXXXXXX" autocomplete="tel">
+    </div>
+    <div class="form-group">
+      <label>Σημειώσεις (προαιρετικό)</label>
+      <input type="text" id="bookNotes" class="form-control" placeholder="π.χ. SUV, βαθύς καθαρισμός">
+    </div>
+    <div class="step-nav">
+      <button class="btn-secondary" onclick="showStep(2)">← Πίσω</button>
+      <button class="btn-primary" onclick="goStep4()">Συνέχεια →</button>
+    </div>
+  </div>
+
+  <!-- Step 4: Confirm -->
+  <div class="step" id="step4">
+    <div class="step-title">Επιβεβαίωση Κράτησης</div>
+    <div class="summary-card" id="summaryCard"></div>
+    <button class="btn-primary" onclick="submitBooking()" id="btnSubmit">Επιβεβαίωση Ραντεβού</button>
+    <button class="btn-secondary" onclick="showStep(3)">← Πίσω</button>
+  </div>
+
+  <!-- Success -->
+  <div class="step" id="stepDone">
+    <div class="success-view">
+      <div class="success-icon">✅</div>
+      <div class="success-title">Η κράτηση ολοκληρώθηκε!</div>
+      <div class="success-sub">Το ραντεβού σας καταχωρήθηκε επιτυχώς. Θα επικοινωνήσουμε μαζί σας για επιβεβαίωση.</div>
+      <div class="success-detail" id="successDetail"></div>
+      <button class="btn-primary" onclick="resetBooking()">Νέα Κράτηση</button>
+    </div>
+  </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const SUPABASE_URL = 'https://alqsoajntjmwkzfekwgg.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFscXNvYWpudGptd2t6ZmVrd2dnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkzOTQ2NzYsImV4cCI6MjA5NDk3MDY3Nn0.KV3HqJlCmb3nCS7rp8It4TZJx0QhfK7YV6VtydI302U';
+const supa = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const ALL_SLOTS = ['09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00'];
+const DAY_NAMES_SHORT = ['Κυρ','Δευ','Τρι','Τετ','Πεμ','Παρ','Σαβ'];
+const MONTH_NAMES = ['Ιαν','Φεβ','Μαρ','Απρ','Μαΐ','Ιουν','Ιουλ','Αυγ','Σεπ','Οκτ','Νοε','Δεκ'];
+const MONTH_NAMES_GEN = ['Ιανουαρίου','Φεβρουαρίου','Μαρτίου','Απριλίου','Μαΐου','Ιουνίου','Ιουλίου','Αυγούστου','Σεπτεμβρίου','Οκτωβρίου','Νοεμβρίου','Δεκεμβρίου'];
+
+let selectedDate = null;
+let selectedSlot = null;
+let bookedSlots = [];
+
+// Build next 7 days (starting tomorrow)
+function buildDateGrid() {
+  const grid = document.getElementById('dateGrid');
+  const dates = [];
+  for (let i = 1; i <= 8; i++) {
+    const d = new Date();
+    d.setDate(d.getDate() + i);
+    d.setHours(0,0,0,0);
+    dates.push(d);
+  }
+  grid.innerHTML = dates.map((d, i) => `
+    <div class="date-btn" id="date-${i}" onclick="selectDate(${i}, '${d.toISOString()}')">
+      <div class="day-name">${DAY_NAMES_SHORT[d.getDay()]}</div>
+      <div class="day-num">${d.getDate()}</div>
+      <div class="month-name">${MONTH_NAMES[d.getMonth()]}</div>
+    </div>`).join('');
+  window._bookDates = dates;
+}
+
+function selectDate(idx, isoStr) {
+  document.querySelectorAll('.date-btn').forEach(b => b.classList.remove('selected'));
+  document.getElementById('date-' + idx).classList.add('selected');
+  selectedDate = new Date(isoStr);
+  selectedSlot = null;
+}
+
+async function goStep2() {
+  if (!selectedDate) { alert('Παρακαλώ επιλέξτε ημερομηνία'); return; }
+  showStep(2);
+  await loadSlots();
+}
+
+function dayRange(date) {
+  const start = new Date(date); start.setHours(0, 0, 0, 0);
+  const end = new Date(date); end.setHours(23, 59, 59, 999);
+  return { start: start.toISOString(), end: end.toISOString() };
+}
+
+function slotFromScheduledAt(scheduledAt) {
+  const d = new Date(scheduledAt);
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+
+function buildScheduledAt(date, slot) {
+  const d = new Date(date);
+  const [hh, mm] = slot.split(':').map(Number);
+  d.setHours(hh, mm, 0, 0);
+  return d.toISOString();
+}
+
+async function loadSlots() {
+  const container = document.getElementById('slotsContainer');
+  container.innerHTML = '<div class="loading-slots"><div class="spinner"></div>Φόρτωση...</div>';
+  try {
+    const { start, end } = dayRange(selectedDate);
+    const { data } = await supa.from('appointments')
+      .select('scheduled_at')
+      .gte('scheduled_at', start)
+      .lte('scheduled_at', end)
+      .neq('status', 'cancelled');
+    bookedSlots = (data || []).map(r => slotFromScheduledAt(r.scheduled_at));
+    container.innerHTML = `<div class="slots-grid">${ALL_SLOTS.map(slot => {
+      const busy = bookedSlots.includes(slot);
+      return `<div class="slot-btn ${busy ? 'booked' : ''}" ${busy ? '' : `onclick="selectSlot('${slot}',this)"`}>${slot}${busy ? '<br><span style="font-size:0.65rem;font-weight:400">Κρατημένο</span>' : ''}</div>`;
+    }).join('')}</div>`;
+  } catch (e) {
+    container.innerHTML = '<div class="loading-slots">Σφάλμα φόρτωσης. Δοκιμάστε ξανά.</div>';
+  }
+}
+
+function selectSlot(slot, el) {
+  document.querySelectorAll('.slot-btn:not(.booked)').forEach(b => b.classList.remove('selected'));
+  el.classList.add('selected');
+  selectedSlot = slot;
+}
+
+function goStep3() {
+  if (!selectedSlot) { alert('Παρακαλώ επιλέξτε ώρα'); return; }
+  showStep(3);
+  setTimeout(() => document.getElementById('bookName').focus(), 100);
+}
+
+function goStep4() {
+  const name = document.getElementById('bookName').value.trim();
+  const phone = document.getElementById('bookPhone').value.trim();
+  if (!name) { alert('Παρακαλώ συμπληρώστε το όνομά σας'); return; }
+  if (!phone) { alert('Παρακαλώ συμπληρώστε το τηλέφωνό σας'); return; }
+
+  const dateStr = `${selectedDate.getDate()} ${MONTH_NAMES_GEN[selectedDate.getMonth()]} ${selectedDate.getFullYear()}`;
+  document.getElementById('summaryCard').innerHTML = `
+    <div class="summary-row"><span>Ημερομηνία</span><strong>${dateStr}</strong></div>
+    <div class="summary-row"><span>Ώρα</span><strong>${selectedSlot}</strong></div>
+    <div class="summary-row"><span>Όνομα</span><strong>${name}</strong></div>
+    <div class="summary-row"><span>Τηλέφωνο</span><strong>${phone}</strong></div>`;
+
+  showStep(4);
+}
+
+async function submitBooking() {
+  const btn = document.getElementById('btnSubmit');
+  btn.disabled = true;
+  btn.textContent = 'Αποστολή...';
+
+  const name = document.getElementById('bookName').value.trim();
+  const phone = document.getElementById('bookPhone').value.trim();
+  const notes = document.getElementById('bookNotes').value.trim();
+
+  const scheduledAt = buildScheduledAt(selectedDate, selectedSlot);
+
+  // Double-check slot still free
+  const { start, end } = dayRange(selectedDate);
+  const { data: check } = await supa.from('appointments')
+    .select('id')
+    .gte('scheduled_at', start)
+    .lte('scheduled_at', end)
+    .neq('status', 'cancelled');
+  const stillBusy = (check || []).some(r => slotFromScheduledAt(r.scheduled_at) === selectedSlot);
+  if (stillBusy) {
+    btn.disabled = false;
+    btn.textContent = 'Επιβεβαίωση Ραντεβού';
+    alert('Λυπούμαστε, αυτή η ώρα μόλις κρατήθηκε. Παρακαλώ επιλέξτε άλλη ώρα.');
+    showStep(2);
+    await loadSlots();
+    return;
+  }
+
+  try {
+    const { error } = await supa.from('appointments').insert({
+      scheduled_at: scheduledAt,
+      customer_name: name, customer_phone: phone,
+      notes, status: 'pending', source: 'online'
+    });
+    if (error) throw error;
+
+    const dateDisplay = `${selectedDate.getDate()} ${MONTH_NAMES_GEN[selectedDate.getMonth()]} ${selectedDate.getFullYear()}`;
+    document.getElementById('successDetail').innerHTML = `
+      <div class="success-detail-row"><span class="success-detail-label">Ημερομηνία</span><span class="success-detail-val">${dateDisplay}</span></div>
+      <div class="success-detail-row"><span class="success-detail-label">Ώρα</span><span class="success-detail-val">${selectedSlot}</span></div>
+      <div class="success-detail-row"><span class="success-detail-label">Όνομα</span><span class="success-detail-val">${name}</span></div>
+      <div class="success-detail-row"><span class="success-detail-label">Τηλέφωνο</span><span class="success-detail-val">${phone}</span></div>`;
+    showStep('done');
+    updateDots('done');
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = 'Επιβεβαίωση Ραντεβού';
+    alert('Σφάλμα: ' + e.message);
+  }
+}
+
+function showStep(n) {
+  document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+  const id = n === 'done' ? 'stepDone' : 'step' + n;
+  document.getElementById(id).classList.add('active');
+  if (n !== 'done') updateDots(n);
+  window.scrollTo(0, 0);
+}
+
+function updateDots(step) {
+  [1,2,3,4].forEach(i => {
+    const dot = document.getElementById('dot' + i);
+    if (!dot) return;
+    if (step === 'done') { dot.className = 'progress-dot done'; return; }
+    dot.className = 'progress-dot' + (i === step ? ' active' : i < step ? ' done' : '');
+  });
+}
+
+function resetBooking() {
+  selectedDate = null;
+  selectedSlot = null;
+  showStep(1);
+  updateDots(1);
+  buildDateGrid();
+}
+
+buildDateGrid();
+</script>
+</body>
+</html>

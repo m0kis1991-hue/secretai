@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>CarWash Pro</title>
+<link rel="manifest" href="manifest.json">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<!-- SPLASH SCREEN -->
+<div id="splash">
+  <div class="splash-inner">
+    <div class="splash-logo">
+      <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
+        <circle cx="32" cy="32" r="30" fill="#0F4C81" stroke="#00C2FF" stroke-width="2"/>
+        <path d="M16 38 Q32 22 48 38" stroke="#00C2FF" stroke-width="3" fill="none" stroke-linecap="round"/>
+        <path d="M12 44 Q32 26 52 44" stroke="white" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.5"/>
+        <ellipse cx="32" cy="40" rx="14" ry="6" fill="#00C2FF" opacity="0.3"/>
+        <rect x="22" y="28" width="20" height="10" rx="3" fill="white" opacity="0.9"/>
+        <rect x="24" y="24" width="16" height="6" rx="2" fill="white" opacity="0.7"/>
+      </svg>
+    </div>
+    <h1 class="splash-title">CarWash Pro</h1>
+    <p class="splash-sub">Επαγγελματική Διαχείριση Πλυντηρίου</p>
+    <div class="splash-loader"><div></div></div>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div id="app" class="hidden">
+
+  <!-- SIDEBAR (desktop only) -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <svg width="38" height="38" viewBox="0 0 64 64" fill="none">
+        <circle cx="32" cy="32" r="30" fill="rgba(255,255,255,0.15)"/>
+        <path d="M16 38 Q32 22 48 38" stroke="#00C2FF" stroke-width="3" fill="none" stroke-linecap="round"/>
+        <rect x="22" y="28" width="20" height="10" rx="3" fill="white" opacity="0.9"/>
+        <rect x="24" y="24" width="16" height="6" rx="2" fill="white" opacity="0.7"/>
+      </svg>
+      <div>
+        <div class="sidebar-brand-name">CarWash Pro</div>
+        <div class="sidebar-brand-sub">Διαχείριση Πλυντηρίου</div>
+      </div>
+    </div>
+
+    <nav class="sidebar-nav">
+      <button class="snav-btn active" id="snav-dashboard" onclick="showPage('dashboard')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        <span>Dashboard</span>
+      </button>
+      <button class="snav-btn" id="snav-active" onclick="showPage('active')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        <span>Ενεργά</span>
+        <span class="snav-badge" id="sideActiveBadge" style="display:none">0</span>
+      </button>
+      <button class="snav-btn snav-new-btn" onclick="showPage('newJob')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        <span>Νέα Εργασία</span>
+      </button>
+      <button class="snav-btn" id="snav-appointments" onclick="showPage('appointments')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        <span>Ραντεβού</span>
+        <span class="snav-badge" id="sideApptBadge" style="display:none">0</span>
+      </button>
+      <button class="snav-btn" id="snav-history" onclick="showPage('history')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+        <span>Ιστορικό</span>
+      </button>
+      <button class="snav-btn snav-advisor-btn" id="snav-advisor" onclick="showPage('advisor')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <span>AI Σύμβουλος</span>
+      </button>
+      <button class="snav-btn" id="snav-settings" onclick="showPage('settings')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <span>Ρυθμίσεις</span>
+      </button>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="sidebar-date" id="sidebarDate"></div>
+    </div>
+  </aside>
+
+  <!-- MAIN AREA -->
+  <div class="main-area">
+
+    <!-- TOP BAR -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <button id="backBtn" class="btn-icon hidden" onclick="goBack()">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 5l-7 7 7 7"/></svg>
+        </button>
+        <div class="brand" id="pageTitle">
+          <svg width="28" height="28" viewBox="0 0 64 64" fill="none">
+            <circle cx="32" cy="32" r="30" fill="#0F4C81"/>
+            <path d="M16 38 Q32 22 48 38" stroke="#00C2FF" stroke-width="3" fill="none" stroke-linecap="round"/>
+            <rect x="22" y="28" width="20" height="10" rx="3" fill="white" opacity="0.9"/>
+            <rect x="24" y="24" width="16" height="6" rx="2" fill="white" opacity="0.7"/>
+          </svg>
+          <span>CarWash Pro</span>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <div class="date-badge" id="topDate"></div>
+        <button class="btn-icon" onclick="showPage('settings')">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- PAGES CONTAINER -->
+    <main class="pages">
+
+      <!-- ===== DASHBOARD PAGE ===== -->
+      <div id="page-dashboard" class="page active">
+        <div class="page-scroll">
+          <div class="dashboard-header">
+            <div>
+              <p class="dash-greeting" id="greeting"></p>
+              <h2 class="dash-title">Καλώς ήρθατε!</h2>
+            </div>
+            <div class="dash-day-label" id="dashDay"></div>
+          </div>
+
+          <div class="stats-grid">
+            <div class="stat-card stat-blue">
+              <div class="stat-icon">🚗</div>
+              <div class="stat-val" id="statToday">0</div>
+              <div class="stat-label">Σήμερα</div>
+            </div>
+            <div class="stat-card stat-orange">
+              <div class="stat-icon">⏳</div>
+              <div class="stat-val" id="statActive">0</div>
+              <div class="stat-label">Ενεργά</div>
+            </div>
+            <div class="stat-card stat-green">
+              <div class="stat-icon">✅</div>
+              <div class="stat-val" id="statDone">0</div>
+              <div class="stat-label">Παραδόθηκαν</div>
+            </div>
+            <div class="stat-card stat-purple">
+              <div class="stat-icon">💶</div>
+              <div class="stat-val" id="statRevenue">0€</div>
+              <div class="stat-label">Έσοδα Σήμερα</div>
+            </div>
+          </div>
+
+          <div class="section-header">
+            <h3>Ενεργές Εργασίες</h3>
+            <button class="see-all" onclick="showPage('active')">Όλες →</button>
+          </div>
+          <div id="dashActiveJobs" class="dash-jobs-list">
+            <div class="empty-state">
+              <div class="empty-icon">🚿</div>
+              <p>Δεν υπάρχουν ενεργές εργασίες</p>
+              <button class="btn-primary" onclick="showPage('newJob')">+ Νέα Εργασία</button>
+            </div>
+          </div>
+
+          <!-- 7-day chart -->
+          <div class="section-header" style="margin-top:28px">
+            <h3>Έσοδα Τελευταίων 7 Ημερών</h3>
+          </div>
+          <div class="chart-container" id="dashChart"></div>
+
+          <!-- Top services -->
+          <div class="section-header" style="margin-top:24px">
+            <h3>Δημοφιλείς Υπηρεσίες</h3>
+          </div>
+          <div class="top-svcs-container" id="dashTopServices"></div>
+        </div>
+      </div>
+
+      <!-- ===== NEW JOB PAGE ===== -->
+      <div id="page-newJob" class="page">
+        <div class="page-scroll">
+          <div class="form-wizard">
+
+            <!-- Step Indicator -->
+            <div class="steps-bar">
+              <div class="step active" id="step-dot-1"><span>1</span><label>Όχημα</label></div>
+              <div class="step-line"></div>
+              <div class="step" id="step-dot-2"><span>2</span><label>Υπηρεσίες</label></div>
+              <div class="step-line"></div>
+              <div class="step" id="step-dot-3"><span>3</span><label>Χρόνος</label></div>
+            </div>
+
+            <!-- STEP 1: Vehicle Info -->
+            <div id="formStep1" class="form-step active">
+              <h3 class="step-title">Στοιχεία Οχήματος & Πελάτη</h3>
+
+              <div class="form-group">
+                <label>Πινακίδα Κυκλοφορίας *</label>
+                <input type="text" id="plateInput" placeholder="ΑΑΑ-0000" class="form-control plate-input" autocomplete="off">
+                <div id="plateHistoryCard" class="hidden"></div>
+              </div>
+
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Μάρκα</label>
+                  <select id="brandSelect" class="form-control" onchange="updateBrand()">
+                    <option value="">Επιλογή...</option>
+                    <option>Toyota</option><option>Volkswagen</option><option>BMW</option>
+                    <option>Mercedes</option><option>Audi</option><option>Ford</option>
+                    <option>Opel</option><option>Peugeot</option><option>Renault</option>
+                    <option>Fiat</option><option>Nissan</option><option>Hyundai</option>
+                    <option>Kia</option><option>Seat</option><option>Skoda</option>
+                    <option>Citroen</option><option>Volvo</option><option>Mazda</option>
+                    <option>Honda</option><option>Suzuki</option><option>Άλλη</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Μοντέλο</label>
+                  <input type="text" id="modelInput" placeholder="π.χ. Corolla" class="form-control">
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label>Κατηγορία Οχήματος *</label>
+                <div class="vehicle-type-grid">
+                  <button class="vtype-btn" data-type="small" onclick="selectVehicleType(this)">
+                    <span class="vtype-icon">🚗</span>
+                    <span>Μικρό</span>
+                    <small>Smart, Aygo, 500</small>
+                  </button>
+                  <button class="vtype-btn" data-type="sedan" onclick="selectVehicleType(this)">
+                    <span class="vtype-icon">🚘</span>
+                    <span>Sedan/Hatch</span>
+                    <small>Corolla, Golf</small>
+                  </button>
+                  <button class="vtype-btn" data-type="suv" onclick="selectVehicleType(this)">
+                    <span class="vtype-icon">🚙</span>
+                    <span>SUV/Jeep</span>
+                    <small>RAV4, Tucson</small>
+                  </button>
+                  <button class="vtype-btn" data-type="van" onclick="selectVehicleType(this)">
+                    <span class="vtype-icon">🚐</span>
+                    <span>Van/MPV</span>
+                    <small>Transit, Viano</small>
+                  </button>
+                  <button class="vtype-btn" data-type="truck" onclick="selectVehicleType(this)">
+                    <span class="vtype-icon">🛻</span>
+                    <span>Pick-up</span>
+                    <small>Hilux, Ranger</small>
+                  </button>
+                  <button class="vtype-btn" data-type="moto" onclick="selectVehicleType(this)">
+                    <span class="vtype-icon">🏍️</span>
+                    <span>Μοτο/Σκούτερ</span>
+                    <small></small>
+                  </button>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label>Χρώμα Οχήματος</label>
+                <div class="color-picker">
+                  <div class="color-swatch" style="background:#1a1a1a" data-color="Μαύρο" onclick="selectColor(this)"></div>
+                  <div class="color-swatch" style="background:#e8e8e8;border:1px solid #ccc" data-color="Λευκό" onclick="selectColor(this)"></div>
+                  <div class="color-swatch" style="background:#888" data-color="Γκρι" onclick="selectColor(this)"></div>
+                  <div class="color-swatch" style="background:#c0c0c0" data-color="Ασημί" onclick="selectColor(this)"></div>
+                  <div class="color-swatch" style="background:#1a3a6b" data-color="Μπλε" onclick="selectColor(this)"></div>
+                  <div class="color-swatch" style="background:#8B0000" data-color="Κόκκινο" onclick="selectColor(this)"></div>
+                  <div class="color-swatch" style="background:#006400" data-color="Πράσινο" onclick="selectColor(this)"></div>
+                  <div class="color-swatch" style="background:#8B4513" data-color="Καφέ" onclick="selectColor(this)"></div>
+                  <div class="color-swatch" style="background:#FFD700" data-color="Κίτρινο" onclick="selectColor(this)"></div>
+                  <div class="color-swatch" style="background:linear-gradient(135deg,#f00,#00f,#0f0)" data-color="Άλλο" onclick="selectColor(this)"></div>
+                </div>
+                <span id="colorLabel" class="color-label">—</span>
+              </div>
+
+              <div class="section-divider"><span>Στοιχεία Πελάτη</span></div>
+
+              <div class="form-group">
+                <label>Ονοματεπώνυμο Πελάτη *</label>
+                <div class="voice-input-group">
+                  <input type="text" id="customerName" placeholder="π.χ. Γιάννης Παπαδόπουλος" class="form-control">
+                  <button class="btn-voice" type="button" data-voice="customerName" onclick="startVoiceInput('customerName')" title="Φωνητική εισαγωγή">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+                  </button>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label>Τηλέφωνο *</label>
+                <div class="voice-input-group">
+                  <input type="tel" id="customerPhone" placeholder="69XXXXXXXX" class="form-control">
+                  <button class="btn-voice" type="button" data-voice="customerPhone" onclick="startVoiceInput('customerPhone')" title="Φωνητική εισαγωγή">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+                  </button>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label>Email (προαιρετικό)</label>
+                <input type="email" id="customerEmail" placeholder="email@example.com" class="form-control">
+              </div>
+
+              <div class="form-group">
+                <label>Προτιμώμενος τρόπος επικοινωνίας *</label>
+                <div class="comm-grid">
+                  <button class="comm-btn" data-comm="phone" onclick="selectComm(this)">
+                    <span>📞</span><span>Κλήση</span>
+                  </button>
+                  <button class="comm-btn" data-comm="sms" onclick="selectComm(this)">
+                    <span>💬</span><span>SMS</span>
+                  </button>
+                  <button class="comm-btn" data-comm="whatsapp" onclick="selectComm(this)">
+                    <span>🟢</span><span>WhatsApp</span>
+                  </button>
+                  <button class="comm-btn" data-comm="email" onclick="selectComm(this)">
+                    <span>📧</span><span>Email</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label>Παρατηρήσεις</label>
+                <div class="voice-input-group voice-input-group-area">
+                  <textarea id="customerNotes" class="form-control" rows="2" placeholder="Ιδιαίτερες σημειώσεις για τον πελάτη..."></textarea>
+                  <button class="btn-voice" type="button" data-voice="customerNotes" onclick="startVoiceInput('customerNotes')" title="Φωνητική εισαγωγή">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+                  </button>
+                </div>
+              </div>
+
+              <button class="btn-primary btn-full btn-large" onclick="goToStep2()">
+                Επόμενο: Υπηρεσίες →
+              </button>
+            </div>
+
+            <!-- STEP 2: Services -->
+            <div id="formStep2" class="form-step">
+              <h3 class="step-title">Επιλογή Υπηρεσιών</h3>
+              <p class="step-sub" id="vehicleTypeLabel">Κατηγορία: —</p>
+
+              <div id="servicesContainer"></div>
+
+              <div class="form-group mt-16">
+                <label>📅 Επιθυμητή Ώρα Παραλαβής</label>
+                <input type="datetime-local" id="pickupTime" class="form-control">
+              </div>
+
+              <div class="selected-summary" id="selectedSummary">
+                <div class="summary-header">
+                  <span>Επιλεγμένες Υπηρεσίες</span>
+                  <span class="summary-total" id="summaryTotal">0.00€</span>
+                </div>
+                <div id="summaryList"></div>
+              </div>
+
+              <div class="form-row">
+                <button class="btn-secondary btn-full" onclick="goToStep1()">← Πίσω</button>
+                <button class="btn-primary btn-full btn-large" onclick="goToStep3()">Επόμενο: Χρόνος →</button>
+              </div>
+            </div>
+
+            <!-- STEP 3: Time & Confirm -->
+            <div id="formStep3" class="form-step">
+              <h3 class="step-title">Εκτιμώμενος Χρόνος</h3>
+
+              <div class="time-picker-card">
+                <p class="time-label">Πόση ώρα χρειάζεται για όλες τις εργασίες;</p>
+                <div class="time-selector">
+                  <button class="time-btn" onclick="adjustTime(-30)">−</button>
+                  <div class="time-display">
+                    <span id="timeHours">0</span>ω
+                    <span id="timeMinutes">30</span>λ
+                  </div>
+                  <button class="time-btn" onclick="adjustTime(30)">+</button>
+                </div>
+                <div class="time-quick">
+                  <button onclick="setTime(15)">15λ</button>
+                  <button onclick="setTime(30)">30λ</button>
+                  <button onclick="setTime(45)">45λ</button>
+                  <button onclick="setTime(60)">1ω</button>
+                  <button onclick="setTime(90)">1.5ω</button>
+                  <button onclick="setTime(120)">2ω</button>
+                  <button onclick="setTime(180)">3ω</button>
+                </div>
+              </div>
+
+              <div class="confirm-card">
+                <h4>Σύνοψη Εργασίας</h4>
+                <div id="confirmSummary"></div>
+              </div>
+
+              <div class="form-row">
+                <button class="btn-secondary btn-full" onclick="goToStep2Back()">← Πίσω</button>
+                <button class="btn-primary btn-full btn-large btn-start" onclick="startJob()">
+                  🚀 Έναρξη Εργασίας
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== ACTIVE JOBS PAGE ===== -->
+      <div id="page-active" class="page">
+        <div class="page-scroll">
+          <h3 class="page-heading">Ενεργές Εργασίες</h3>
+          <div id="activeJobsList" class="jobs-grid"></div>
+        </div>
+      </div>
+
+      <!-- ===== JOB DETAIL PAGE ===== -->
+      <div id="page-jobDetail" class="page">
+        <div class="page-scroll" id="jobDetailContent"></div>
+      </div>
+
+      <!-- ===== HISTORY PAGE ===== -->
+      <div id="page-history" class="page">
+        <div class="page-scroll">
+          <h3 class="page-heading">Ιστορικό Εργασιών</h3>
+          <div class="history-controls">
+            <div class="filter-row">
+              <button class="filter-btn active" data-filter="all" onclick="filterHistory('all', this)">Όλα</button>
+              <button class="filter-btn" data-filter="today" onclick="filterHistory('today', this)">Σήμερα</button>
+              <button class="filter-btn" data-filter="week" onclick="filterHistory('week', this)">Εβδομάδα</button>
+              <button class="filter-btn" data-filter="month" onclick="filterHistory('month', this)">Μήνας</button>
+            </div>
+            <div class="history-search-wrap">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input type="text" id="historySearch" class="history-search" placeholder="Αναζήτηση πινακίδας, πελάτη..." oninput="renderHistory(document.querySelector('.filter-btn.active')?.dataset?.filter||'all')">
+            </div>
+          </div>
+          <div id="historyList" class="jobs-grid"></div>
+        </div>
+      </div>
+
+      <!-- ===== AI ADVISOR PAGE ===== -->
+      <div id="page-advisor" class="page">
+        <div class="advisor-page-wrap">
+          <div class="advisor-topbar">
+            <div class="advisor-topbar-left">
+              <div class="advisor-ai-badge">AI</div>
+              <div>
+                <div class="advisor-topbar-title">Επιχειρηματικός Σύμβουλος</div>
+                <div class="advisor-topbar-sub">Ανάλυση βασισμένη στα δεδομένα σας</div>
+              </div>
+            </div>
+            <button class="advisor-clear-btn" onclick="clearAdvisorChat()" title="Νέα συνομιλία">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.67"/></svg>
+            </button>
+          </div>
+
+          <div class="advisor-quick-chips">
+            <button class="advisor-chip" onclick="askAdvisor('Ανάλυσε τα δεδομένα μου και πες μου πού μπορώ να βελτιωθώ')">Ανάλυση δεδομένων</button>
+            <button class="advisor-chip" onclick="askAdvisor('Τι νέες υπηρεσίες να προσθέσω που πωλούν καλά στην αγορά;')">Νέες υπηρεσίες</button>
+            <button class="advisor-chip" onclick="askAdvisor('Πώς να αυξήσω τον μέσο λογαριασμό ανά πελάτη;')">Αύξηση εσόδων</button>
+            <button class="advisor-chip" onclick="askAdvisor('Ιδέες για marketing και προσέλκυση νέων πελατών')">Marketing</button>
+            <button class="advisor-chip" onclick="askAdvisor('Πώς να κρατώ τους πελάτες μου και να τους κάνω να επιστρέφουν;')">Retention</button>
+            <button class="advisor-chip" onclick="askAdvisor('Προτείνεις κάποιο πακέτο τιμολόγησης ή συνδρομή για τους πελάτες μου;')">Πακέτα & Συνδρομές</button>
+          </div>
+
+          <div class="advisor-messages" id="advisorMessages"></div>
+
+          <div class="advisor-input-area">
+            <textarea id="advisorInput" class="advisor-input" rows="1"
+              placeholder="Ρωτήστε κάτι για την επιχείρησή σας..."
+              onkeydown="advisorInputKeydown(event)"
+              oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'"></textarea>
+            <button class="advisor-send-btn" id="advisorSendBtn" onclick="sendAdvisorMessage()">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== APPOINTMENTS PAGE ===== -->
+      <div id="page-appointments" class="page">
+        <div class="page-scroll">
+          <div class="appt-page-header">
+            <h3 class="page-heading" style="margin:0">Ραντεβού</h3>
+            <button class="btn-primary" onclick="openApptModal('')">+ Νέο Ραντεβού</button>
+          </div>
+
+          <!-- Day navigation -->
+          <div class="appt-day-nav">
+            <button class="appt-nav-btn" onclick="apptPrevDay()">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
+            </button>
+            <span class="appt-date-label" id="apptDateLabel">Σήμερα</span>
+            <button class="appt-nav-btn" onclick="apptNextDay()">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 18l6-6-6-6"/></svg>
+            </button>
+            <button class="appt-today-btn" id="apptTodayBtn" onclick="apptGoToday()">Σήμερα</button>
+          </div>
+
+          <!-- Day view slots -->
+          <div id="apptDayView" class="appt-day-view"></div>
+
+          <!-- Booking link card -->
+          <div class="booking-link-card" style="margin-top:20px">
+            <div class="booking-link-title">Σύνδεσμος Online Κράτησης</div>
+            <div class="booking-link-sub">Στείλτε αυτόν τον σύνδεσμο στους πελάτες σας για να κλείνουν ραντεβού online</div>
+            <div class="booking-link-url" id="bookingLinkUrl"></div>
+            <div class="booking-link-actions">
+              <button class="btn-secondary" onclick="copyBookingLink()">Αντιγραφή</button>
+              <button class="btn-primary" onclick="openExternal(window.location.origin+'/book.html')">Άνοιγμα</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== SETTINGS PAGE ===== -->
+      <div id="page-settings" class="page">
+        <div class="page-scroll">
+          <h3 class="page-heading">Ρυθμίσεις</h3>
+
+          <div class="settings-grid">
+            <div class="settings-section">
+              <h4 class="settings-title">Στοιχεία Καταστήματος</h4>
+              <div class="form-group">
+                <label>Όνομα Καταστήματος</label>
+                <input type="text" id="shopName" class="form-control" placeholder="Το πλυντήριό μου">
+              </div>
+              <div class="form-group">
+                <label>Τηλέφωνο</label>
+                <input type="tel" id="shopPhone" class="form-control" placeholder="210XXXXXXX">
+              </div>
+              <div class="form-group">
+                <label>Διεύθυνση</label>
+                <input type="text" id="shopAddress" class="form-control" placeholder="Οδός, Αριθμός, Πόλη">
+              </div>
+              <button class="btn-secondary" onclick="saveShopInfo()">Αποθήκευση</button>
+            </div>
+
+            <div class="settings-section">
+              <h4 class="settings-title">Μηνύματα & Αξιολόγηση</h4>
+              <p class="settings-hint">Μεταβλητές: {name} = όνομα, {plate} = πινακίδα, {shop} = κατάστημα</p>
+
+              <div class="form-group">
+                <label>Μήνυμα Ετοιμότητας (όταν τελειώσουν οι εργασίες)</label>
+                <textarea id="completionMsg" class="form-control" rows="3" placeholder="Αγαπητέ/ή {name}, το όχημά σας {plate} είναι έτοιμο για παραλαβή!"></textarea>
+              </div>
+
+              <div class="form-group">
+                <label>Μήνυμα Ευχαριστιών (μετά την παραλαβή)</label>
+                <textarea id="thankYouMsg" class="form-control" rows="3" placeholder="Αγαπητέ/ή {name}, σας ευχαριστούμε θερμά! Θα χαρούμε να σας εξυπηρετήσουμε ξανά!"></textarea>
+              </div>
+
+              <div class="form-group">
+                <label>⭐ Σύνδεσμος Αξιολόγησης (Google Maps, Facebook κτλπ)</label>
+                <input type="url" id="reviewUrl" class="form-control" placeholder="https://g.page/r/...">
+                <p class="settings-hint" style="margin-top:4px">Θα προστίθεται αυτόματα στο μήνυμα ευχαριστιών</p>
+              </div>
+
+              <button class="btn-secondary" onclick="saveCompletionMsg()">Αποθήκευση</button>
+            </div>
+          </div>
+
+          <!-- Services Editor -->
+          <div class="settings-section">
+            <div class="settings-section-header">
+              <div>
+                <h4 class="settings-title">Διαχείριση Υπηρεσιών</h4>
+                <p class="settings-hint">Προσθέστε, επεξεργαστείτε ή διαγράψτε τις υπηρεσίες του καταστήματός σας.<br>
+                  <strong>Τιμή:</strong> η βασική τιμή (για sedan). Για SUV/Van εφαρμόζεται αυτόματα πολλαπλασιαστής.</p>
+              </div>
+            </div>
+            <div class="svc-editor-header-row">
+              <span>Υπηρεσία</span><span>Τιμή €</span><span>Χρόνος λ.</span><span></span>
+            </div>
+            <div id="servicesEditor"></div>
+            <div class="svc-editor-actions">
+              <button class="btn-secondary" onclick="addService()">+ Νέα Υπηρεσία</button>
+              <button class="btn-primary" onclick="saveServices()">💾 Αποθήκευση</button>
+              <button class="btn-danger" onclick="resetServices()" style="margin-left:auto">↺ Reset</button>
+            </div>
+          </div>
+
+          <!-- Detailed Stats -->
+          <div class="settings-section">
+            <h4 class="settings-title">Στατιστικά Επιχείρησης</h4>
+            <div id="statsOverall"></div>
+            <div style="margin-top:16px">
+              <button class="btn-danger" onclick="clearHistory()">🗑️ Εκκαθάριση Ιστορικού</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- BOTTOM NAV (mobile / tablet only) -->
+    <nav class="bottom-nav">
+      <button class="nav-btn active" id="nav-dashboard" onclick="showPage('dashboard')">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        <span>Dashboard</span>
+      </button>
+      <button class="nav-btn" id="nav-active" onclick="showPage('active')">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        <span>Ενεργά</span>
+        <span class="nav-badge" id="activeBadge">0</span>
+      </button>
+      <button class="nav-btn new-btn" onclick="showPage('newJob')">
+        <div class="new-btn-circle">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </div>
+        <span>Νέα Εργασία</span>
+      </button>
+      <button class="nav-btn" id="nav-appointments" onclick="showPage('appointments')">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        <span>Ραντεβού</span>
+        <span class="nav-badge" id="apptBadge" style="display:none">0</span>
+      </button>
+      <button class="nav-btn" id="nav-advisor" onclick="showPage('advisor')">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <span>AI</span>
+      </button>
+    </nav>
+
+  </div><!-- /main-area -->
+
+</div><!-- /app -->
+
+<!-- APPOINTMENT MODAL -->
+<div id="apptModal" class="appt-modal-overlay hidden" onclick="if(event.target===this)closeApptModal()">
+  <div class="appt-modal">
+    <div class="appt-modal-header">
+      <h3>Νέο Ραντεβού</h3>
+      <button class="appt-modal-close" onclick="closeApptModal()">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="appt-modal-body">
+      <div class="form-group">
+        <label>Ώρα</label>
+        <select id="apptModalTime" class="form-control">
+          <option value="">Επιλέξτε ώρα...</option>
+          <option>09:00</option><option>10:00</option><option>11:00</option>
+          <option>12:00</option><option>13:00</option><option>14:00</option>
+          <option>15:00</option><option>16:00</option><option>17:00</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Όνομα Πελάτη</label>
+        <input type="text" id="apptModalName" class="form-control" placeholder="Όνομα Επώνυμο">
+      </div>
+      <div class="form-group">
+        <label>Τηλέφωνο</label>
+        <input type="tel" id="apptModalPhone" class="form-control" placeholder="69XXXXXXXX">
+      </div>
+      <div class="form-group">
+        <label>Σημειώσεις (προαιρετικό)</label>
+        <input type="text" id="apptModalNotes" class="form-control" placeholder="π.χ. SUV, βαθύς καθαρισμός">
+      </div>
+    </div>
+    <div class="appt-modal-footer">
+      <button class="btn-secondary" onclick="closeApptModal()">Ακύρωση</button>
+      <button class="btn-primary" onclick="createManualAppointment()">Αποθήκευση</button>
+    </div>
+  </div>
+</div>
+
+<!-- NOTIFICATION OVERLAY -->
+<div id="notifOverlay" class="notif-overlay hidden">
+  <div class="notif-card">
+    <div class="notif-icon" id="notifIcon">✅</div>
+    <h3 id="notifTitle">Ολοκληρώθηκε!</h3>
+    <p id="notifMsg"></p>
+    <div class="notif-actions" id="notifActions"></div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="toast" class="toast hidden"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="app.js"></script>
+</body>
+</html>
