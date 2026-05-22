@@ -1871,3 +1871,215 @@ select.form-control { cursor: pointer; }
 }
 .toggle-switch input:checked + .toggle-slider { background: var(--blue); }
 .toggle-switch input:checked + .toggle-slider::before { transform: translateX(20px); }
+
+/* ===== CUSTOMERS PAGE ===== */
+.cust-page-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.cust-search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 12px;
+  flex: 1;
+  max-width: 340px;
+  color: var(--text3);
+}
+.cust-search-input {
+  border: none;
+  background: transparent;
+  outline: none;
+  font-size: 0.87rem;
+  color: var(--text1);
+  width: 100%;
+}
+.cust-search-input::placeholder { color: var(--text3); }
+
+/* Customer card */
+.cust-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  margin-bottom: 10px;
+  overflow: hidden;
+  transition: box-shadow 0.15s;
+  cursor: pointer;
+}
+.cust-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.18); }
+.cust-card-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+}
+.cust-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--blue), #00C2FF);
+  color: white;
+  font-family: Syne, sans-serif;
+  font-weight: 700;
+  font-size: 1.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.cust-info { flex: 1; min-width: 0; }
+.cust-name {
+  font-weight: 700;
+  font-size: 0.97rem;
+  color: var(--text1);
+  margin-bottom: 2px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cust-phone { font-size: 0.82rem; color: var(--text2); margin-bottom: 6px; }
+.cust-vehicles-row { display: flex; flex-wrap: wrap; gap: 5px; }
+.cust-vehicle-tag {
+  font-size: 0.75rem;
+  background: rgba(0,194,255,0.1);
+  border: 1px solid rgba(0,194,255,0.2);
+  color: var(--blue);
+  border-radius: 6px;
+  padding: 2px 7px;
+}
+.cust-stats-mini {
+  text-align: right;
+  flex-shrink: 0;
+  min-width: 64px;
+}
+.csm-val { font-family: Syne, sans-serif; font-weight: 700; font-size: 1.05rem; color: var(--blue); }
+.csm-label { font-size: 0.68rem; color: var(--text3); margin-bottom: 4px; }
+.csm-val2 { font-size: 0.8rem; font-weight: 600; color: var(--text2); }
+.csm-sub { font-size: 0.68rem; color: var(--text3); margin-top: 2px; }
+.cust-actions-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+.cust-action-btn {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 5px 8px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background 0.15s;
+  line-height: 1;
+}
+.cust-action-btn:hover { background: rgba(0,194,255,0.15); }
+.cust-action-book { border-color: rgba(0,194,255,0.3); }
+
+/* Loyalty bar */
+.cust-loyalty-bar {
+  padding: 8px 16px 10px;
+  border-top: 1px solid var(--border);
+  background: rgba(255,215,0,0.04);
+}
+.cust-loyalty-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.78rem;
+  margin-bottom: 5px;
+  color: var(--text2);
+}
+.loyalty-badge {
+  background: linear-gradient(135deg,#FFD700,#FFA500);
+  color: #000;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 20px;
+  font-size: 0.75rem;
+}
+.loyalty-dot { font-size: 0.9rem; }
+.loyalty-reward-name { font-style: italic; font-size: 0.75rem; color: var(--text3); }
+.cust-loyalty-track {
+  height: 5px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.cust-loyalty-fill {
+  height: 100%;
+  background: linear-gradient(90deg,#FFD700,#FFA500);
+  border-radius: 3px;
+  transition: width 0.4s;
+}
+
+/* Customer detail (vehicle history) */
+.cust-detail {
+  border-top: 1px solid var(--border);
+  padding: 12px 16px;
+  display: none;
+}
+.cust-detail.open { display: block; }
+.cust-vehicle-history { margin-bottom: 14px; }
+.cvh-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text1);
+  margin-bottom: 7px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--border);
+}
+.cvh-stats { font-size: 0.78rem; color: var(--blue); font-weight: 700; }
+.cvh-entries { display: flex; flex-direction: column; gap: 4px; }
+.cvh-entry {
+  display: grid;
+  grid-template-columns: 90px 1fr auto;
+  gap: 8px;
+  font-size: 0.8rem;
+  padding: 5px 8px;
+  background: var(--bg2);
+  border-radius: 7px;
+  align-items: center;
+}
+.cvh-date { color: var(--text3); white-space: nowrap; }
+.cvh-services { color: var(--text2); }
+.cvh-price { font-weight: 700; color: var(--text1); white-space: nowrap; }
+.cvh-more { font-size: 0.75rem; color: var(--text3); text-align: center; padding: 4px; }
+
+/* ===== APPOINTMENT EDIT MODAL ===== */
+.appt-edit-info {
+  background: var(--bg2);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+}
+.appt-edit-cust-name { font-weight: 700; font-size: 1rem; margin-bottom: 2px; }
+.appt-edit-cust-phone { font-size: 0.83rem; color: var(--text2); }
+.appt-edit-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 16px;
+}
+.btn-danger-outline {
+  background: transparent;
+  border: 1.5px solid var(--danger, #E74C3C);
+  color: var(--danger, #E74C3C);
+  border-radius: 10px;
+  padding: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background 0.15s;
+}
+.btn-danger-outline:hover { background: rgba(231,76,60,0.08); }

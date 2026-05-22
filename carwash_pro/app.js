@@ -114,7 +114,7 @@ function updateClock() {
 
 // ===== NAVIGATION =====
 function showPage(page) {
-  ['dashboard','active','history','settings','advisor','appointments'].forEach(p => {
+  ['dashboard','active','history','settings','advisor','appointments','customers'].forEach(p => {
     const el = document.getElementById('nav-' + p);
     if (el) el.classList.toggle('active', p === page);
     const sel = document.getElementById('snav-' + p);
@@ -156,6 +156,7 @@ function showPage(page) {
   if (page === 'newJob') initNewJob();
   if (page === 'advisor') renderAdvisorPage();
   if (page === 'appointments') { renderAppointmentsPage(); loadAppointments(); }
+  if (page === 'customers') renderCustomersPage();
 }
 
 function goBack() {
@@ -915,6 +916,12 @@ function renderSettings() {
   document.getElementById('completionMsg').value = state.settings.completionMsg || '';
   document.getElementById('thankYouMsg').value = state.settings.thankYouMsg || '';
   document.getElementById('reviewUrl').value = state.settings.reviewUrl || '';
+  const la = document.getElementById('loyaltyAmountThreshold');
+  const lw = document.getElementById('loyaltyWashThreshold');
+  const lr = document.getElementById('loyaltyReward');
+  if (la) la.value = state.settings.loyaltyAmountThreshold || '';
+  if (lw) lw.value = state.settings.loyaltyWashThreshold || '';
+  if (lr) lr.value = state.settings.loyaltyReward || '';
   renderServicesList();
   renderDetailedStats();
 }
@@ -1552,7 +1559,7 @@ function renderAppointmentsPage() {
     const statusLabel = { confirmed:'Επιβεβαιωμένο', cancelled:'Ακυρωμένο', pending:'Εκκρεμεί' }[appt.status] || appt.status;
     const vehicleLine = [appt.plate, [appt.brand, appt.model].filter(Boolean).join(' '), appt.vehicle_type ? VEHICLE_LABELS[appt.vehicle_type] : ''].filter(Boolean).join(' · ');
     return `
-      <div class="appt-slot ${statusClass}">
+      <div class="appt-slot ${statusClass}" style="cursor:pointer" onclick="openApptEditModal('${appt.id}')">
         <div class="appt-slot-time">${slot}${slotsNeeded > 1 ? `<div style="font-size:0.65rem;color:var(--text3);margin-top:1px">${slotsNeeded} ώρ.</div>` : ''}</div>
         <div class="appt-slot-info">
           <div class="appt-slot-name">${appt.customer_name}</div>
@@ -1562,7 +1569,7 @@ function renderAppointmentsPage() {
           ${appt.notes ? `<div class="appt-slot-notes" style="color:var(--text2)">${appt.notes}</div>` : ''}
           <span class="appt-source-tag">${appt.source === 'online' ? '🌐 Online' : '📞 Χειροκίνητο'}</span>
         </div>
-        <div class="appt-slot-actions">
+        <div class="appt-slot-actions" onclick="event.stopPropagation()">
           <span class="appt-status-badge appt-status-${appt.status}">${statusLabel}</span>
           ${appt.status !== 'cancelled' ? `<button class="btn-appt-convert" onclick="convertApptToJob('${appt.id}')" title="Δημιουργία εργασίας">➕</button>` : ''}
           ${appt.status === 'pending' ? `
@@ -1750,3 +1757,303 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 window.addEventListener('load', init);
+
+// ===== CUSTOMERS CRM =====
+
+function formatDateShort(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  const pad = n => String(n).padStart(2,'0');
+  return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}`;
+}
+
+function buildCustomersData() {
+  const search = (document.getElementById('custSearch')?.value || '').toLowerCase().trim();
+  const map = {};
+
+  state.jobs.filter(j => j.status === 'done').forEach(job => {
+    const phone = (job.customerPhone || '').replace(/\s/g, '');
+    const key = phone || ('name_' + (job.customerName || 'unknown').trim().toLowerCase());
+    if (!map[key]) {
+      map[key] = {
+        key, name: job.customerName || '', phone: job.customerPhone || '',
+        commMethod: job.commMethod || 'phone',
+        totalSpend: 0, totalWashes: 0,
+        vehicles: {}, firstVisit: null, lastVisit: null,
+      };
+    }
+    const c = map[key];
+    if (!c.name && job.customerName) c.name = job.customerName;
+    if (!c.phone && job.customerPhone) c.phone = job.customerPhone;
+    c.totalSpend += (job.finalTotal || 0);
+    c.totalWashes++;
+
+    const visitDate = job.deliveredAt || job.completedAt || job.createdAt;
+    if (!c.firstVisit || visitDate < c.firstVisit) c.firstVisit = visitDate;
+    if (!c.lastVisit || visitDate > c.lastVisit) c.lastVisit = visitDate;
+
+    const plate = (job.plate || '').trim().toUpperCase();
+    if (plate) {
+      if (!c.vehicles[plate]) {
+        c.vehicles[plate] = { plate, type: job.vehicleType || '', brand: job.brand || '', model: job.model || '', washes: 0, totalSpend: 0, history: [] };
+      }
+      const v = c.vehicles[plate];
+      if (job.vehicleType) v.type = job.vehicleType;
+      if (job.brand) v.brand = job.brand;
+      if (job.model) v.model = job.model;
+      v.washes++;
+      v.totalSpend += (job.finalTotal || 0);
+      v.history.unshift({ date: visitDate, services: (job.tasks||[]).map(t=>t.name).join(', '), total: job.finalTotal||0 });
+    }
+  });
+
+  let list = Object.values(map);
+  if (search) {
+    list = list.filter(c =>
+      (c.name||'').toLowerCase().includes(search) ||
+      (c.phone||'').replace(/\s/g,'').includes(search.replace(/\s/g,'')) ||
+      Object.keys(c.vehicles).some(p => p.toLowerCase().includes(search))
+    );
+  }
+  list.sort((a, b) => (b.lastVisit||'') > (a.lastVisit||'') ? 1 : -1);
+  return list;
+}
+
+function getLoyaltyStatus(customer) {
+  const amtThr  = parseFloat(state.settings.loyaltyAmountThreshold) || 0;
+  const washThr = parseInt(state.settings.loyaltyWashThreshold) || 0;
+  const reward  = state.settings.loyaltyReward || 'Δωρεάν πλύσιμο';
+
+  if (amtThr > 0) {
+    const progress = customer.totalSpend % amtThr;
+    const earned   = Math.floor(customer.totalSpend / amtThr);
+    return { active:true, type:'amount', hasReward: earned>0, rewardCount: earned,
+      progress, progressMax: amtThr, progressPct: Math.round(progress/amtThr*100),
+      progressLabel: `${progress.toFixed(0)}€ / ${amtThr}€`, reward };
+  }
+  if (washThr > 0) {
+    const progress = customer.totalWashes % washThr;
+    const earned   = Math.floor(customer.totalWashes / washThr);
+    return { active:true, type:'wash', hasReward: earned>0, rewardCount: earned,
+      progress, progressMax: washThr, progressPct: Math.round(progress/washThr*100),
+      progressLabel: `${progress} / ${washThr} πλύσιμα`, reward };
+  }
+  return { active: false };
+}
+
+function renderCustomersPage() {
+  const container = document.getElementById('customersList');
+  if (!container) return;
+  const customers = buildCustomersData();
+
+  if (!customers.length) {
+    const search = document.getElementById('custSearch')?.value || '';
+    container.innerHTML = `<div class="empty-state" style="padding:60px 20px;text-align:center">
+      <div style="font-size:3rem;margin-bottom:14px">👥</div>
+      <h3 style="margin-bottom:8px">${search ? 'Δεν βρέθηκαν αποτελέσματα' : 'Δεν υπάρχουν πελάτες ακόμα'}</h3>
+      <p style="color:var(--text2);font-size:0.88rem">${search ? 'Δοκιμάστε άλλο όρο.' : 'Ολοκληρώστε εργασίες για να εμφανιστούν οι πελάτες σας.'}</p>
+    </div>`;
+    return;
+  }
+
+  const VI = { small:'🚗', sedan:'🚙', suv:'🚐', van:'🚌', truck:'🛻', moto:'🏍️' };
+  const VL = { small:'Μικρό', sedan:'Sedan', suv:'SUV', van:'Van', truck:'Pick-up', moto:'Μοτο' };
+
+  container.innerHTML = customers.map((c, ci) => {
+    const loyalty = getLoyaltyStatus(c);
+    const daysSince = c.lastVisit ? Math.floor((Date.now()-new Date(c.lastVisit))/86400000) : null;
+    const sinceStr = daysSince===null ? '' : daysSince===0 ? 'Σήμερα' : daysSince===1 ? 'Χτες' : `${daysSince} μέρες`;
+
+    const vehicleTags = Object.values(c.vehicles).map(v =>
+      `<span class="cust-vehicle-tag">${VI[v.type]||'🚗'} <strong>${v.plate}</strong>${v.brand?' · '+v.brand:''}</span>`
+    ).join('');
+
+    const loyaltyHTML = loyalty.active ? `
+      <div class="cust-loyalty-bar">
+        <div class="cust-loyalty-label">
+          ${loyalty.hasReward
+            ? `<span class="loyalty-badge">🎁 Δικαιούται δώρο!</span>`
+            : `<span>🏅 ${loyalty.progressLabel}</span>`}
+          <span class="loyalty-reward-name">${loyalty.reward}</span>
+        </div>
+        ${!loyalty.hasReward ? `<div class="cust-loyalty-track"><div class="cust-loyalty-fill" style="width:${loyalty.progressPct}%"></div></div>` : ''}
+      </div>` : '';
+
+    const vehicleHistoryHTML = Object.values(c.vehicles).map(v => {
+      const vName = [v.brand, v.model].filter(Boolean).join(' ');
+      return `<div class="cust-vehicle-history">
+        <div class="cvh-header">
+          <span>${VI[v.type]||'🚗'} <strong>${v.plate}</strong>${vName?' — '+vName:''}</span>
+          <span class="cvh-stats">${v.washes} πλύσιμα · ${v.totalSpend.toFixed(2)}€</span>
+        </div>
+        <div class="cvh-entries">
+          ${v.history.slice(0,6).map(h => `
+            <div class="cvh-entry">
+              <div class="cvh-date">${formatDateShort(h.date)}</div>
+              <div class="cvh-services">${h.services||'—'}</div>
+              <div class="cvh-price">${h.total.toFixed(2)}€</div>
+            </div>`).join('')}
+          ${v.history.length>6 ? `<div class="cvh-more">+${v.history.length-6} ακόμα επισκέψεις</div>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+
+    const intlPhone = c.phone ? ('30' + c.phone.replace(/^\+?30/,'').replace(/\s/g,'')) : '';
+    const actionCall = c.phone ? `<button class="cust-action-btn" onclick="event.stopPropagation();window.location.href='tel:${c.phone}'" title="Κλήση">📞</button>` : '';
+    const actionWa   = intlPhone ? `<button class="cust-action-btn" onclick="event.stopPropagation();window.location.href='https://wa.me/${intlPhone}'" title="WhatsApp">💬</button>` : '';
+    const actionBook = `<button class="cust-action-btn cust-action-book" onclick="event.stopPropagation();bookForCustomer('${ci}')" title="Νέο ραντεβού">📅</button>`;
+
+    return `<div class="cust-card" onclick="toggleCustomerDetail(this)">
+      <div class="cust-card-main">
+        <div class="cust-avatar">${(c.name||'?').charAt(0).toUpperCase()}</div>
+        <div class="cust-info">
+          <div class="cust-name">${c.name||'Άγνωστος'}${loyalty.hasReward?' <span class="loyalty-dot">🎁</span>':''}</div>
+          <div class="cust-phone">${c.phone||'—'}</div>
+          <div class="cust-vehicles-row">${vehicleTags}</div>
+        </div>
+        <div class="cust-stats-mini">
+          <div class="csm-val">${c.totalSpend.toFixed(0)}€</div>
+          <div class="csm-label">Σύνολο</div>
+          <div class="csm-val2">${c.totalWashes}×</div>
+          <div class="csm-sub">${sinceStr}</div>
+        </div>
+        <div class="cust-actions-row">${actionCall}${actionWa}${actionBook}</div>
+      </div>
+      ${loyaltyHTML}
+      <div class="cust-detail">${vehicleHistoryHTML||'<p style="color:var(--text3);font-size:0.83rem">Δεν υπάρχει ιστορικό οχήματος.</p>'}</div>
+    </div>`;
+  }).join('');
+}
+
+function toggleCustomerDetail(cardEl) {
+  const detail = cardEl.querySelector('.cust-detail');
+  if (detail) detail.classList.toggle('open');
+}
+
+function bookForCustomer(ci) {
+  showPage('appointments');
+}
+
+function saveLoyaltySettings() {
+  state.settings.loyaltyAmountThreshold = parseFloat(document.getElementById('loyaltyAmountThreshold')?.value) || 0;
+  state.settings.loyaltyWashThreshold   = parseInt(document.getElementById('loyaltyWashThreshold')?.value) || 0;
+  state.settings.loyaltyReward          = (document.getElementById('loyaltyReward')?.value || '').trim();
+  saveData();
+  showToast('Ρυθμίσεις επιβράβευσης αποθηκεύτηκαν ✓', 'success');
+}
+
+// ===== APPOINTMENT EDIT MODAL =====
+
+function openApptEditModal(apptId) {
+  const appt = appointments.find(a => a.id === apptId);
+  if (!appt) return;
+
+  const d = new Date(appt.scheduled_at);
+  const dateVal = d.toISOString().split('T')[0];
+  const currentTime = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+  const currentDur  = appt.duration_min || 60;
+
+  const slotOpts = APPT_SLOTS.map(s =>
+    `<option value="${s}" ${s===currentTime?'selected':''}>${s}</option>`
+  ).join('');
+
+  const statusOpts = [
+    {v:'pending',l:'⏳ Εκκρεμεί'},
+    {v:'confirmed',l:'✓ Επιβεβαιωμένο'},
+    {v:'cancelled',l:'✗ Ακυρωμένο'},
+  ].map(o => `<option value="${o.v}" ${o.v===appt.status?'selected':''}>${o.l}</option>`).join('');
+
+  const durBtns = [60,120,180,240].map(m =>
+    `<button class="appt-dur-btn${currentDur===m?' active':''}"
+      onclick="document.querySelectorAll('#apptEditBody .appt-dur-btn').forEach(b=>b.classList.remove('active'));this.classList.add('active')"
+      data-dur="${m}">${m===60?'1 ώρα':m/60+' ώρες'}</button>`
+  ).join('');
+
+  const vehicleLine = [appt.plate, [appt.brand,appt.model].filter(Boolean).join(' ')].filter(Boolean).join(' · ');
+
+  document.getElementById('apptEditBody').innerHTML = `
+    <div class="appt-edit-info">
+      <div class="appt-edit-cust-name">${appt.customer_name||'—'}</div>
+      <div class="appt-edit-cust-phone">${appt.customer_phone||''}${vehicleLine?' · '+vehicleLine:''}</div>
+      ${appt.services ? `<div style="font-size:0.8rem;color:var(--text3);margin-top:4px">${appt.services}</div>` : ''}
+    </div>
+    <div class="form-group">
+      <label>Ημερομηνία</label>
+      <input type="date" id="editApptDate" class="form-control" value="${dateVal}">
+    </div>
+    <div class="form-group">
+      <label>Ώρα</label>
+      <select id="editApptTime" class="form-control">${slotOpts}</select>
+    </div>
+    <div class="form-group">
+      <label>Διάρκεια</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">${durBtns}</div>
+    </div>
+    <div class="form-group">
+      <label>Κατάσταση</label>
+      <select id="editApptStatus" class="form-control">${statusOpts}</select>
+    </div>
+    <div class="form-group">
+      <label>Σημειώσεις</label>
+      <textarea id="editApptNotes" class="form-control" rows="2" placeholder="Σημειώσεις…">${appt.notes||''}</textarea>
+    </div>
+    <div class="appt-edit-actions">
+      <button class="btn-primary" onclick="saveApptEdit('${apptId}')">💾 Αποθήκευση</button>
+      <button class="btn-danger-outline" onclick="deleteApptFromEdit('${apptId}')">🗑 Διαγραφή</button>
+    </div>`;
+
+  document.getElementById('apptEditModal').classList.remove('hidden');
+}
+
+function closeApptEditModal() {
+  document.getElementById('apptEditModal').classList.add('hidden');
+}
+
+async function saveApptEdit(apptId) {
+  const dateVal   = document.getElementById('editApptDate').value;
+  const timeVal   = document.getElementById('editApptTime').value;
+  const statusVal = document.getElementById('editApptStatus').value;
+  const notesVal  = document.getElementById('editApptNotes').value.trim();
+  const activeDurBtn = document.querySelector('#apptEditBody .appt-dur-btn.active');
+  const durVal    = activeDurBtn ? parseInt(activeDurBtn.dataset.dur) : 60;
+
+  if (!dateVal || !timeVal) { showToast('Συμπληρώστε ημερομηνία και ώρα', 'error'); return; }
+
+  const scheduled_at = new Date(`${dateVal}T${timeVal}:00`).toISOString();
+
+  try {
+    const { error } = await supa.from('appointments').update({
+      scheduled_at, duration_min: durVal, status: statusVal, notes: notesVal
+    }).eq('id', apptId);
+    if (error) throw error;
+
+    const idx = appointments.findIndex(a => a.id === apptId);
+    if (idx !== -1) {
+      appointments[idx] = { ...appointments[idx], scheduled_at, duration_min: durVal, status: statusVal, notes: notesVal };
+    }
+    closeApptEditModal();
+    renderAppointmentsPage();
+    showToast('Ραντεβού ενημερώθηκε ✓', 'success');
+
+    if (statusVal === 'confirmed') {
+      const appt = appointments.find(a => a.id === apptId);
+      if (appt) notifyCustomer(appt);
+    }
+  } catch (e) {
+    showToast('Σφάλμα κατά την αποθήκευση', 'error');
+  }
+}
+
+async function deleteApptFromEdit(apptId) {
+  if (!confirm('Να διαγραφεί οριστικά αυτό το ραντεβού;')) return;
+  try {
+    const { error } = await supa.from('appointments').delete().eq('id', apptId);
+    if (error) throw error;
+    appointments = appointments.filter(a => a.id !== apptId);
+    closeApptEditModal();
+    renderAppointmentsPage();
+    showToast('Ραντεβού διαγράφηκε', 'success');
+  } catch (e) {
+    showToast('Σφάλμα κατά τη διαγραφή', 'error');
+  }
+}
