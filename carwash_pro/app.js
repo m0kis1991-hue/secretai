@@ -1641,14 +1641,59 @@ async function createManualAppointment() {
 }
 
 async function updateApptStatus(apptId, newStatus) {
+  const appt = appointments.find(a => a.id === apptId);
   try {
     const { error } = await getSupa().from('appointments').update({ status: newStatus }).eq('id', apptId);
     if (error) throw error;
     await loadAppointments();
     updateApptBadge();
     showToast(newStatus === 'confirmed' ? 'Επιβεβαιώθηκε' : 'Ακυρώθηκε', 'success');
+    if (newStatus === 'confirmed' && appt) notifyCustomer(appt);
   } catch (e) {
     showToast('Σφάλμα ενημέρωσης', 'error');
+  }
+}
+
+async function notifyCustomer(appt) {
+  const d = new Date(appt.scheduled_at);
+  const DAY_NAMES  = ['Κυριακή','Δευτέρα','Τρίτη','Τετάρτη','Πέμπτη','Παρασκευή','Σάββατο'];
+  const MONTH_NAMES_GEN = ['Ιανουαρίου','Φεβρουαρίου','Μαρτίου','Απριλίου','Μαΐου','Ιουνίου','Ιουλίου','Αυγούστου','Σεπτεμβρίου','Οκτωβρίου','Νοεμβρίου','Δεκεμβρίου'];
+  const dateStr = `${DAY_NAMES[d.getDay()]} ${d.getDate()} ${MONTH_NAMES_GEN[d.getMonth()]} ${d.getFullYear()}`;
+  const timeStr = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+
+  try {
+    const resp = await fetch('/api/notify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        phone: appt.customer_phone,
+        name: appt.customer_name,
+        date: dateStr,
+        time: timeStr,
+        services: appt.services || ''
+      })
+    });
+    const data = await resp.json();
+
+    if (data.sent) {
+      showToast('SMS εστάλη στον πελάτη ✓', 'success');
+      return;
+    }
+
+    // Show notification with WhatsApp / SMS links
+    const shopName = state.settings.shopName || 'CarWash Pro';
+    showNotif('📱', 'Ειδοποίηση Πελάτη',
+      `Αποστολή επιβεβαίωσης στον ${appt.customer_name} (${appt.customer_phone}):`,
+      `<a href="${data.waUrl}" target="_blank" rel="noopener" class="btn-primary" style="text-decoration:none;display:block;text-align:center;margin-bottom:10px" onclick="closeNotif()">
+         📱 Αποστολή μέσω WhatsApp
+       </a>
+       <a href="${data.smsUrl}" class="btn-secondary" style="text-decoration:none;display:block;text-align:center;margin-bottom:10px" onclick="closeNotif()">
+         💬 Αποστολή μέσω SMS
+       </a>
+       <button class="btn-secondary" onclick="closeNotif()" style="width:100%">Παράλειψη</button>`
+    );
+  } catch (e) {
+    // Silently ignore — confirm already succeeded
   }
 }
 
