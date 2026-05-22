@@ -31,7 +31,7 @@ let state = {
   prevPage: null,
   jobs: [],
   settings: {
-    shopName: 'CarWash Pro',
+    shopName: 'Yalleasy',
     shopPhone: '',
     shopAddress: '',
     services: null,
@@ -143,7 +143,7 @@ function showPage(page) {
         <rect x="22" y="28" width="20" height="10" rx="3" fill="white" opacity="0.9"/>
         <rect x="24" y="24" width="16" height="6" rx="2" fill="white" opacity="0.7"/>
       </svg>
-      <span>CarWash Pro</span>`;
+      <span>Yalleasy</span>`;
   }
 
   state.prevPage = state.currentPage;
@@ -1407,7 +1407,7 @@ async function syncShopConfigToSupabase() {
   try {
     await supa.from('shop_config').upsert({
       id: 'default',
-      shop_name: state.settings.shopName || 'CarWash Pro',
+      shop_name: state.settings.shopName || 'Yalleasy',
       services: state.settings.services || [],
       updated_at: new Date().toISOString()
     }, { onConflict: 'id' });
@@ -1681,7 +1681,7 @@ async function notifyCustomer(appt) {
     }
 
     // Show notification with WhatsApp / SMS links
-    const shopName = state.settings.shopName || 'CarWash Pro';
+    const shopName = state.settings.shopName || 'Yalleasy';
     showNotif('📱', 'Ειδοποίηση Πελάτη',
       `Αποστολή επιβεβαίωσης στον ${appt.customer_name} (${appt.customer_phone}):`,
       `<a href="${data.waUrl}" target="_blank" rel="noopener" class="btn-primary" style="text-decoration:none;display:block;text-align:center;margin-bottom:10px" onclick="closeNotif()">
