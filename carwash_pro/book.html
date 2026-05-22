@@ -23,29 +23,11 @@ body {
   padding: 28px 20px 24px;
   text-align: center;
 }
-.book-logo {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-.book-shop-name {
-  font-family: 'Syne', sans-serif;
-  font-weight: 800;
-  font-size: 1.35rem;
-}
-.book-sub {
-  font-size: 0.88rem;
-  opacity: 0.8;
-  margin-top: 4px;
-}
+.book-logo { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 10px; }
+.book-shop-name { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 1.35rem; }
+.book-sub { font-size: 0.88rem; opacity: 0.8; margin-top: 4px; }
 
-.book-body {
-  max-width: 480px;
-  margin: 0 auto;
-  padding: 20px 16px 40px;
-}
+.book-body { max-width: 480px; margin: 0 auto; padding: 20px 16px 40px; }
 
 .step { display: none; }
 .step.active { display: block; animation: fadeUp 0.25s ease; }
@@ -63,20 +45,10 @@ body {
 }
 
 /* Date picker */
-.date-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-  margin-bottom: 20px;
-}
+.date-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 20px; }
 .date-btn {
-  background: white;
-  border: 2px solid #E2E8F0;
-  border-radius: 10px;
-  padding: 10px 6px;
-  cursor: pointer;
-  text-align: center;
-  transition: all 0.15s;
+  background: white; border: 2px solid #E2E8F0; border-radius: 10px;
+  padding: 10px 6px; cursor: pointer; text-align: center; transition: all 0.15s;
 }
 .date-btn:hover { border-color: #0F4C81; }
 .date-btn.selected { background: #0F4C81; border-color: #0F4C81; color: white; }
@@ -87,82 +59,69 @@ body {
 /* Service cards */
 .services-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
 .svc-card {
-  background: white;
-  border: 2px solid #E2E8F0;
-  border-radius: 12px;
-  padding: 14px 16px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  transition: all 0.15s;
+  background: white; border: 2px solid #E2E8F0; border-radius: 12px;
+  padding: 14px 16px; cursor: pointer; display: flex; align-items: center; gap: 12px; transition: all 0.15s;
 }
 .svc-card:hover { border-color: #0F4C81; }
 .svc-card.selected { border-color: #0F4C81; background: #f0f7ff; }
 .svc-card.selected .svc-check { background: #0F4C81; border-color: #0F4C81; }
 .svc-card.selected .svc-check::after { display: block; }
 .svc-check {
-  width: 22px; height: 22px;
-  border: 2px solid #CBD5E1;
-  border-radius: 6px;
-  flex-shrink: 0;
-  position: relative;
-  transition: all 0.15s;
+  width: 22px; height: 22px; border: 2px solid #CBD5E1; border-radius: 6px;
+  flex-shrink: 0; position: relative; transition: all 0.15s;
 }
 .svc-check::after {
-  content: '';
-  display: none;
-  position: absolute;
-  left: 4px; top: 1px;
-  width: 8px; height: 12px;
-  border: 2.5px solid white;
-  border-top: none;
-  border-left: none;
-  transform: rotate(45deg);
+  content: ''; display: none; position: absolute; left: 4px; top: 1px;
+  width: 8px; height: 12px; border: 2.5px solid white;
+  border-top: none; border-left: none; transform: rotate(45deg);
 }
 .svc-info { flex: 1; }
 .svc-name { font-weight: 600; font-size: 0.92rem; color: #1E293B; }
 .svc-meta { font-size: 0.78rem; color: #64748B; margin-top: 2px; }
-.svc-price {
-  font-family: 'Syne', sans-serif;
-  font-weight: 700;
-  font-size: 1rem;
-  color: #0F4C81;
-  flex-shrink: 0;
-}
+.svc-price { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 1rem; color: #0F4C81; flex-shrink: 0; }
 .svc-card.selected .svc-price { color: #0a2f52; }
 
 .duration-bar {
-  background: #f0f7ff;
-  border: 1px solid #bfdbfe;
-  border-radius: 10px;
-  padding: 10px 14px;
-  margin-bottom: 14px;
-  font-size: 0.85rem;
-  color: #0F4C81;
-  display: none;
+  background: #f0f7ff; border: 1px solid #bfdbfe; border-radius: 10px;
+  padding: 10px 14px; margin-bottom: 14px; font-size: 0.85rem; color: #0F4C81; display: none;
 }
 .duration-bar strong { font-family: 'Syne', sans-serif; font-weight: 700; }
 
-/* Time slots */
-.slots-grid {
+/* Vehicle type buttons */
+.vtype-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-  margin-bottom: 20px;
+  gap: 8px;
+  margin-bottom: 16px;
 }
-.slot-btn {
+.vtype-btn {
   background: white;
   border: 2px solid #E2E8F0;
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 14px 8px;
   cursor: pointer;
   text-align: center;
-  font-family: 'Syne', sans-serif;
-  font-weight: 700;
-  font-size: 1rem;
-  color: #0F4C81;
   transition: all 0.15s;
+}
+.vtype-btn:hover { border-color: #0F4C81; }
+.vtype-btn.selected { background: #0F4C81; border-color: #0F4C81; color: white; }
+.vtype-btn .vt-icon { font-size: 1.5rem; margin-bottom: 4px; display: block; }
+.vtype-btn .vt-label { font-size: 0.75rem; font-weight: 600; display: block; line-height: 1.3; }
+.vtype-btn .vt-mult { font-size: 0.68rem; color: #94A3B8; margin-top: 2px; display: block; }
+.vtype-btn.selected .vt-mult { color: rgba(255,255,255,0.7); }
+
+/* Two-col form row */
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+/* Plate input — uppercase */
+.plate-input { text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; font-family: 'Syne', sans-serif; }
+
+/* Time slots */
+.slots-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px; }
+.slot-btn {
+  background: white; border: 2px solid #E2E8F0; border-radius: 10px; padding: 14px 8px;
+  cursor: pointer; text-align: center; font-family: 'Syne', sans-serif;
+  font-weight: 700; font-size: 1rem; color: #0F4C81; transition: all 0.15s;
 }
 .slot-btn:hover:not(.booked) { border-color: #0F4C81; background: #f0f7ff; }
 .slot-btn.selected { background: #0F4C81; border-color: #0F4C81; color: white; }
@@ -171,175 +130,108 @@ body {
 /* Form */
 .form-group { margin-bottom: 14px; }
 .form-group label {
-  display: block;
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: #64748B;
-  margin-bottom: 5px;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
+  display: block; font-size: 0.82rem; font-weight: 600; color: #64748B;
+  margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.3px;
 }
 .form-control {
-  width: 100%;
-  background: white;
-  border: 1.5px solid #E2E8F0;
-  border-radius: 10px;
-  padding: 12px 14px;
-  font-size: 0.95rem;
-  color: #1E293B;
-  font-family: 'DM Sans', sans-serif;
-  outline: none;
-  transition: border-color 0.15s;
+  width: 100%; background: white; border: 1.5px solid #E2E8F0; border-radius: 10px;
+  padding: 12px 14px; font-size: 0.95rem; color: #1E293B;
+  font-family: 'DM Sans', sans-serif; outline: none; transition: border-color 0.15s;
 }
 .form-control:focus { border-color: #0F4C81; box-shadow: 0 0 0 3px rgba(15,76,129,0.1); }
 
 /* Summary card */
 .summary-card {
-  background: white;
-  border-radius: 14px;
-  padding: 18px;
-  margin-bottom: 20px;
+  background: white; border-radius: 14px; padding: 18px; margin-bottom: 16px;
   box-shadow: 0 2px 12px rgba(15,76,129,0.08);
 }
 .summary-row {
-  display: flex;
-  justify-content: space-between;
-  padding: 6px 0;
-  font-size: 0.88rem;
-  border-bottom: 1px solid #F0F4F8;
+  display: flex; justify-content: space-between; padding: 6px 0;
+  font-size: 0.88rem; border-bottom: 1px solid #F0F4F8;
 }
 .summary-row:last-child { border-bottom: none; }
 .summary-row strong { color: #1E293B; }
-.summary-services-list {
-  font-size: 0.82rem;
-  color: #1E293B;
-  font-weight: 600;
-  text-align: right;
-  max-width: 55%;
-  line-height: 1.5;
+
+/* Cost estimate in confirmation */
+.cost-breakdown {
+  background: white; border-radius: 14px; padding: 16px 18px;
+  margin-bottom: 16px; box-shadow: 0 2px 12px rgba(15,76,129,0.08);
 }
+.cost-title {
+  font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.82rem;
+  color: #64748B; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 10px;
+}
+.cost-line {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 5px 0; font-size: 0.88rem; border-bottom: 1px solid #F8FAFC;
+}
+.cost-line:last-of-type { border-bottom: none; }
+.cost-line .svc-n { color: #1E293B; }
+.cost-line .svc-p { font-family: 'Syne', sans-serif; font-weight: 700; color: #0F4C81; }
+.cost-total {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 0 0; margin-top: 6px; border-top: 2px solid #0F4C81;
+}
+.cost-total .label { font-weight: 700; color: #1E293B; font-size: 0.9rem; }
+.cost-total .amount {
+  font-family: 'Syne', sans-serif; font-weight: 800; font-size: 1.2rem; color: #0F4C81;
+}
+.cost-disclaimer {
+  background: #FFF7ED; border: 1px solid #FED7AA; border-radius: 10px;
+  padding: 12px 14px; margin-bottom: 16px; font-size: 0.82rem; color: #92400E;
+  display: flex; gap: 8px; align-items: flex-start; line-height: 1.5;
+}
+.cost-disclaimer .disc-icon { font-size: 1rem; flex-shrink: 0; margin-top: 1px; }
 
 /* Buttons */
 .btn-primary {
-  display: block;
-  width: 100%;
-  background: #0F4C81;
-  color: white;
-  border: none;
-  border-radius: 12px;
-  padding: 15px;
-  font-size: 1rem;
-  font-weight: 700;
-  font-family: 'Syne', sans-serif;
-  cursor: pointer;
-  transition: background 0.15s, transform 0.12s;
+  display: block; width: 100%; background: #0F4C81; color: white; border: none;
+  border-radius: 12px; padding: 15px; font-size: 1rem; font-weight: 700;
+  font-family: 'Syne', sans-serif; cursor: pointer; transition: background 0.15s, transform 0.12s;
 }
 .btn-primary:hover { background: #1a6ab5; transform: translateY(-1px); }
 .btn-primary:disabled { background: #94A3B8; cursor: not-allowed; transform: none; }
-
 .btn-secondary {
-  display: block;
-  width: 100%;
-  background: white;
-  color: #0F4C81;
-  border: 2px solid #0F4C81;
-  border-radius: 12px;
-  padding: 13px;
-  font-size: 0.95rem;
-  font-weight: 600;
-  font-family: 'DM Sans', sans-serif;
-  cursor: pointer;
-  margin-top: 10px;
-  transition: background 0.15s;
+  display: block; width: 100%; background: white; color: #0F4C81;
+  border: 2px solid #0F4C81; border-radius: 12px; padding: 13px; font-size: 0.95rem;
+  font-weight: 600; font-family: 'DM Sans', sans-serif; cursor: pointer;
+  margin-top: 10px; transition: background 0.15s;
 }
 .btn-secondary:hover { background: #f0f7ff; }
-
-.step-nav {
-  display: flex;
-  gap: 10px;
-  margin-top: 16px;
-}
+.step-nav { display: flex; gap: 10px; margin-top: 16px; }
 .step-nav .btn-primary { flex: 2; margin: 0; }
 .step-nav .btn-secondary { flex: 1; margin: 0; width: auto; display: flex; align-items: center; justify-content: center; }
 
 /* Progress dots */
-.progress-dots {
-  display: flex;
-  justify-content: center;
-  gap: 8px;
-  margin-bottom: 20px;
-}
-.progress-dot {
-  width: 8px; height: 8px;
-  border-radius: 50%;
-  background: #E2E8F0;
-  transition: all 0.2s;
-}
-.progress-dot.active { background: #0F4C81; width: 20px; border-radius: 4px; }
+.progress-dots { display: flex; justify-content: center; gap: 6px; margin-bottom: 20px; }
+.progress-dot { width: 8px; height: 8px; border-radius: 50%; background: #E2E8F0; transition: all 0.2s; }
+.progress-dot.active { background: #0F4C81; width: 18px; border-radius: 4px; }
 .progress-dot.done { background: #00C47A; }
 
 /* Loading */
-.loading-slots {
-  text-align: center;
-  padding: 30px;
-  color: #64748B;
-}
+.loading-slots { text-align: center; padding: 30px; color: #64748B; }
 .spinner {
-  width: 32px; height: 32px;
-  border: 3px solid #E2E8F0;
-  border-top-color: #0F4C81;
-  border-radius: 50%;
-  animation: spin 0.7s linear infinite;
-  margin: 0 auto 12px;
+  width: 32px; height: 32px; border: 3px solid #E2E8F0; border-top-color: #0F4C81;
+  border-radius: 50%; animation: spin 0.7s linear infinite; margin: 0 auto 12px;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* Success */
 .success-view {
-  text-align: center;
-  padding: 30px 20px;
-  background: white;
-  border-radius: 16px;
-  box-shadow: 0 2px 12px rgba(15,76,129,0.08);
+  text-align: center; padding: 30px 20px; background: white;
+  border-radius: 16px; box-shadow: 0 2px 12px rgba(15,76,129,0.08);
 }
 .success-icon { font-size: 3rem; margin-bottom: 16px; }
-.success-title {
-  font-family: 'Syne', sans-serif;
-  font-weight: 800;
-  font-size: 1.3rem;
-  color: #00C47A;
-  margin-bottom: 8px;
-}
-.success-sub {
-  color: #64748B;
-  font-size: 0.9rem;
-  line-height: 1.5;
-  margin-bottom: 20px;
-}
-.success-detail {
-  background: #F0F4F8;
-  border-radius: 10px;
-  padding: 14px;
-  margin-bottom: 20px;
-  text-align: left;
-}
-.success-detail-row {
-  display: flex;
-  gap: 8px;
-  font-size: 0.88rem;
-  padding: 4px 0;
-}
+.success-title { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 1.3rem; color: #00C47A; margin-bottom: 8px; }
+.success-sub { color: #64748B; font-size: 0.9rem; line-height: 1.5; margin-bottom: 20px; }
+.success-detail { background: #F0F4F8; border-radius: 10px; padding: 14px; margin-bottom: 20px; text-align: left; }
+.success-detail-row { display: flex; gap: 8px; font-size: 0.88rem; padding: 4px 0; }
 .success-detail-label { color: #64748B; min-width: 80px; }
 .success-detail-val { font-weight: 600; color: #1E293B; }
 
 .no-services-msg {
-  background: white;
-  border-radius: 12px;
-  padding: 24px;
-  text-align: center;
-  color: #64748B;
-  font-size: 0.9rem;
-  margin-bottom: 16px;
+  background: white; border-radius: 12px; padding: 24px;
+  text-align: center; color: #64748B; font-size: 0.9rem; margin-bottom: 16px;
 }
 </style>
 </head>
@@ -366,6 +258,7 @@ body {
     <div class="progress-dot" id="dot3"></div>
     <div class="progress-dot" id="dot4"></div>
     <div class="progress-dot" id="dot5"></div>
+    <div class="progress-dot" id="dot6"></div>
   </div>
 
   <!-- Step 1: Pick date -->
@@ -390,45 +283,83 @@ body {
     </div>
   </div>
 
-  <!-- Step 3: Pick time -->
+  <!-- Step 3: Vehicle details -->
   <div class="step" id="step3">
+    <div class="step-title">Στοιχεία Οχήματος</div>
+
+    <div class="form-group">
+      <label>Πινακίδα *</label>
+      <input type="text" id="bookPlate" class="form-control plate-input"
+             placeholder="ΑΒΓ-1234" autocomplete="off" maxlength="10"
+             oninput="this.value=this.value.toUpperCase()">
+    </div>
+
+    <div class="form-group">
+      <label>Κατηγορία Οχήματος *</label>
+      <div class="vtype-grid" id="vtypeGrid"></div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label>Μάρκα</label>
+        <input type="text" id="bookBrand" class="form-control" placeholder="Toyota">
+      </div>
+      <div class="form-group">
+        <label>Μοντέλο</label>
+        <input type="text" id="bookModel" class="form-control" placeholder="Yaris">
+      </div>
+    </div>
+
+    <div class="step-nav">
+      <button class="btn-secondary" onclick="showStep(2)">← Πίσω</button>
+      <button class="btn-primary" onclick="goStep4()">Επόμενο →</button>
+    </div>
+  </div>
+
+  <!-- Step 4: Pick time -->
+  <div class="step" id="step4">
     <div class="step-title">Επιλέξτε Ώρα</div>
     <div id="slotsContainer">
       <div class="loading-slots"><div class="spinner"></div>Φόρτωση διαθέσιμων ωρών...</div>
     </div>
     <div class="step-nav">
-      <button class="btn-secondary" onclick="showStep(2)">← Πίσω</button>
-      <button class="btn-primary" onclick="goStep4()" id="btnStep3">Επόμενο →</button>
+      <button class="btn-secondary" onclick="showStep(3)">← Πίσω</button>
+      <button class="btn-primary" onclick="goStep5()">Επόμενο →</button>
     </div>
   </div>
 
-  <!-- Step 4: Fill info -->
-  <div class="step" id="step4">
+  <!-- Step 5: Contact info -->
+  <div class="step" id="step5">
     <div class="step-title">Στοιχεία Επικοινωνίας</div>
     <div class="form-group">
-      <label>Ονοματεπώνυμο</label>
+      <label>Ονοματεπώνυμο *</label>
       <input type="text" id="bookName" class="form-control" placeholder="Γιώργης Παπαδόπουλος" autocomplete="name">
     </div>
     <div class="form-group">
-      <label>Τηλέφωνο</label>
+      <label>Τηλέφωνο *</label>
       <input type="tel" id="bookPhone" class="form-control" placeholder="69XXXXXXXX" autocomplete="tel">
     </div>
     <div class="form-group">
       <label>Σημειώσεις (προαιρετικό)</label>
-      <input type="text" id="bookNotes" class="form-control" placeholder="π.χ. SUV, extra βρώμικο">
+      <input type="text" id="bookNotes" class="form-control" placeholder="π.χ. extra βρώμικο εσωτερικό">
     </div>
     <div class="step-nav">
-      <button class="btn-secondary" onclick="showStep(3)">← Πίσω</button>
-      <button class="btn-primary" onclick="goStep5()">Συνέχεια →</button>
+      <button class="btn-secondary" onclick="showStep(4)">← Πίσω</button>
+      <button class="btn-primary" onclick="goStep6()">Συνέχεια →</button>
     </div>
   </div>
 
-  <!-- Step 5: Confirm -->
-  <div class="step" id="step5">
+  <!-- Step 6: Confirm -->
+  <div class="step" id="step6">
     <div class="step-title">Επιβεβαίωση Κράτησης</div>
     <div class="summary-card" id="summaryCard"></div>
+    <div class="cost-breakdown" id="costBreakdown"></div>
+    <div class="cost-disclaimer">
+      <span class="disc-icon">⚠️</span>
+      <span>Η τελική τιμή ενδέχεται να τροποποιηθεί ανάλογα με την κατάσταση του οχήματος κατά την παραλαβή.</span>
+    </div>
     <button class="btn-primary" onclick="submitBooking()" id="btnSubmit">Επιβεβαίωση Ραντεβού</button>
-    <button class="btn-secondary" onclick="showStep(4)">← Πίσω</button>
+    <button class="btn-secondary" onclick="showStep(5)">← Πίσω</button>
   </div>
 
   <!-- Success -->
@@ -455,13 +386,25 @@ const DAY_NAMES_SHORT = ['Κυρ','Δευ','Τρι','Τετ','Πεμ','Παρ','
 const MONTH_NAMES = ['Ιαν','Φεβ','Μαρ','Απρ','Μαΐ','Ιουν','Ιουλ','Αυγ','Σεπ','Οκτ','Νοε','Δεκ'];
 const MONTH_NAMES_GEN = ['Ιανουαρίου','Φεβρουαρίου','Μαρτίου','Απριλίου','Μαΐου','Ιουνίου','Ιουλίου','Αυγούστου','Σεπτεμβρίου','Οκτωβρίου','Νοεμβρίου','Δεκεμβρίου'];
 
+const PRICE_MULTIPLIERS = { small:0.85, sedan:1.0, suv:1.2, van:1.3, truck:1.25, moto:0.7 };
+const VEHICLE_TYPE_DEFS = [
+  { key:'small',  label:'Μικρό',        icon:'🚗', mult:'×0.85' },
+  { key:'sedan',  label:'Sedan/Hatch',  icon:'🚙', mult:'×1.00' },
+  { key:'suv',    label:'SUV/Jeep',     icon:'🚐', mult:'×1.20' },
+  { key:'van',    label:'Van/MPV',      icon:'🚌', mult:'×1.30' },
+  { key:'truck',  label:'Pick-up',      icon:'🛻', mult:'×1.25' },
+  { key:'moto',   label:'Μοτο/Σκούτερ',icon:'🏍️', mult:'×0.70' },
+];
+
+// State
 let selectedDate = null;
 let selectedServices = [];
+let selectedVehicleType = null;
 let selectedSlot = null;
 let shopServices = [];
 let shopServicesLoaded = false;
 
-// ─── Date grid ───────────────────────────────────────────────────────────────
+// ─── Date grid ────────────────────────────────────────────────────────────────
 function buildDateGrid() {
   const grid = document.getElementById('dateGrid');
   const dates = [];
@@ -520,16 +463,18 @@ function renderServices(container) {
     </div>`;
     return;
   }
-  container.innerHTML = `<div class="services-list">${shopServices.map(s => `
-    <div class="svc-card" id="svc-${s.id}" onclick="toggleService('${s.id}')">
+  container.innerHTML = `<div class="services-list">${shopServices.map(s => {
+    const isSelected = selectedServices.some(sv => sv.id === s.id);
+    return `
+    <div class="svc-card${isSelected ? ' selected' : ''}" id="svc-${s.id}" onclick="toggleService('${s.id}')">
       <div class="svc-check"></div>
       <div class="svc-info">
         <div class="svc-name">${s.name}</div>
         <div class="svc-meta">~${s.duration} λεπτά</div>
       </div>
       <div class="svc-price">${(s.basePrice || 0).toFixed(0)}€</div>
-    </div>`).join('')}
-  </div>`;
+    </div>`;
+  }).join('')}</div>`;
 }
 
 function toggleService(id) {
@@ -574,6 +519,33 @@ function goStep3() {
     return;
   }
   showStep(3);
+  renderVehicleTypes();
+}
+
+// ─── Vehicle details ──────────────────────────────────────────────────────────
+function renderVehicleTypes() {
+  const grid = document.getElementById('vtypeGrid');
+  grid.innerHTML = VEHICLE_TYPE_DEFS.map(vt => `
+    <div class="vtype-btn${selectedVehicleType === vt.key ? ' selected' : ''}"
+         id="vtype-${vt.key}" onclick="selectVehicleType('${vt.key}')">
+      <span class="vt-icon">${vt.icon}</span>
+      <span class="vt-label">${vt.label}</span>
+      <span class="vt-mult">${vt.mult}</span>
+    </div>`).join('');
+}
+
+function selectVehicleType(key) {
+  selectedVehicleType = key;
+  document.querySelectorAll('.vtype-btn').forEach(b => b.classList.remove('selected'));
+  const el = document.getElementById('vtype-' + key);
+  if (el) el.classList.add('selected');
+}
+
+function goStep4() {
+  const plate = document.getElementById('bookPlate').value.trim();
+  if (!plate) { alert('Παρακαλώ συμπληρώστε την πινακίδα'); return; }
+  if (!selectedVehicleType) { alert('Παρακαλώ επιλέξτε κατηγορία οχήματος'); return; }
+  showStep(4);
   loadSlots();
 }
 
@@ -611,7 +583,6 @@ async function loadSlots() {
       .lte('scheduled_at', end)
       .neq('status', 'cancelled');
 
-    // Mark all occupied slot indices as busy
     const busySet = new Set();
     (data || []).forEach(r => {
       const startSlot = slotFromScheduledAt(r.scheduled_at);
@@ -623,7 +594,6 @@ async function loadSlots() {
       }
     });
 
-    // Build slot buttons — a slot is available if all slotsNeeded consecutive slots are free
     const html = ALL_SLOTS.map((slot, idx) => {
       if (idx + slotsNeeded > ALL_SLOTS.length) {
         return `<div class="slot-btn booked">${slot}<br><span style="font-size:0.6rem;font-weight:400">Μη διαθ.</span></div>`;
@@ -650,34 +620,56 @@ function selectSlot(slot, el) {
   selectedSlot = slot;
 }
 
-function goStep4() {
+function goStep5() {
   if (!selectedSlot) { alert('Παρακαλώ επιλέξτε ώρα'); return; }
-  showStep(4);
+  showStep(5);
   setTimeout(() => document.getElementById('bookName').focus(), 100);
 }
 
 // ─── Info ─────────────────────────────────────────────────────────────────────
-function goStep5() {
+function goStep6() {
   const name = document.getElementById('bookName').value.trim();
   const phone = document.getElementById('bookPhone').value.trim();
   if (!name) { alert('Παρακαλώ συμπληρώστε το όνομά σας'); return; }
   if (!phone) { alert('Παρακαλώ συμπληρώστε το τηλέφωνό σας'); return; }
 
+  const plate = document.getElementById('bookPlate').value.trim().toUpperCase();
+  const brand = document.getElementById('bookBrand').value.trim();
+  const model = document.getElementById('bookModel').value.trim();
+  const vtDef = VEHICLE_TYPE_DEFS.find(v => v.key === selectedVehicleType);
+  const mult = PRICE_MULTIPLIERS[selectedVehicleType] || 1.0;
   const dateStr = `${selectedDate.getDate()} ${MONTH_NAMES_GEN[selectedDate.getMonth()]} ${selectedDate.getFullYear()}`;
-  const svcNames = selectedServices.length > 0
-    ? selectedServices.map(s => s.name).join(', ')
-    : '—';
-  const totalPrice = selectedServices.reduce((s, svc) => s + (svc.basePrice || 0), 0);
 
+  // Summary card
   document.getElementById('summaryCard').innerHTML = `
     <div class="summary-row"><span>Ημερομηνία</span><strong>${dateStr}</strong></div>
     <div class="summary-row"><span>Ώρα</span><strong>${selectedSlot}</strong></div>
-    <div class="summary-row"><span>Υπηρεσίες</span><div class="summary-services-list">${svcNames}</div></div>
-    ${totalPrice > 0 ? `<div class="summary-row"><span>Εκτιμώμενη τιμή</span><strong>${totalPrice.toFixed(0)}€</strong></div>` : ''}
+    <div class="summary-row"><span>Πινακίδα</span><strong>${plate}</strong></div>
+    <div class="summary-row"><span>Όχημα</span><strong>${[brand, model, vtDef?.label].filter(Boolean).join(' · ')}</strong></div>
     <div class="summary-row"><span>Όνομα</span><strong>${name}</strong></div>
     <div class="summary-row"><span>Τηλέφωνο</span><strong>${phone}</strong></div>`;
 
-  showStep(5);
+  // Cost breakdown
+  if (selectedServices.length > 0) {
+    const lines = selectedServices.map(s => {
+      const price = Math.round(s.basePrice * mult * 100) / 100;
+      return `<div class="cost-line"><span class="svc-n">${s.name}</span><span class="svc-p">~${price.toFixed(0)}€</span></div>`;
+    }).join('');
+    const total = selectedServices.reduce((sum, s) => sum + Math.round(s.basePrice * mult * 100) / 100, 0);
+    const multNote = vtDef ? ` (${vtDef.label} ${vtDef.mult})` : '';
+    document.getElementById('costBreakdown').innerHTML = `
+      <div class="cost-title">Εκτίμηση Κόστους${multNote}</div>
+      ${lines}
+      <div class="cost-total">
+        <span class="label">Εκτιμώμενο Σύνολο</span>
+        <span class="amount">~${total.toFixed(0)}€</span>
+      </div>`;
+    document.getElementById('costBreakdown').style.display = '';
+  } else {
+    document.getElementById('costBreakdown').style.display = 'none';
+  }
+
+  showStep(6);
 }
 
 // ─── Submit ───────────────────────────────────────────────────────────────────
@@ -686,16 +678,19 @@ async function submitBooking() {
   btn.disabled = true;
   btn.textContent = 'Αποστολή...';
 
-  const name = document.getElementById('bookName').value.trim();
+  const name  = document.getElementById('bookName').value.trim();
   const phone = document.getElementById('bookPhone').value.trim();
   const notes = document.getElementById('bookNotes').value.trim();
+  const plate = document.getElementById('bookPlate').value.trim().toUpperCase();
+  const brand = document.getElementById('bookBrand').value.trim();
+  const model = document.getElementById('bookModel').value.trim();
 
   const totalDuration = Math.max(getTotalDuration(), 60);
-  const slotsNeeded = Math.ceil(totalDuration / 60);
-  const scheduledAt = buildScheduledAt(selectedDate, selectedSlot);
-  const servicesText = selectedServices.map(s => s.name).join(', ');
+  const slotsNeeded   = Math.ceil(totalDuration / 60);
+  const scheduledAt   = buildScheduledAt(selectedDate, selectedSlot);
+  const servicesText  = selectedServices.map(s => s.name).join(', ');
 
-  // Double-check all needed slots are still free
+  // Double-check slots still free
   const { start, end } = dayRange(selectedDate);
   const { data: check } = await supa.from('appointments')
     .select('scheduled_at, duration_min')
@@ -710,38 +705,51 @@ async function submitBooking() {
     const n = Math.max(Math.ceil((r.duration_min || 60) / 60), 1);
     for (let k = 0; k < n; k++) { if (si + k < ALL_SLOTS.length) busySet.add(si + k); }
   });
-  const startIdx = ALL_SLOTS.indexOf(selectedSlot);
+  const startIdx  = ALL_SLOTS.indexOf(selectedSlot);
   const stillFree = Array.from({length: slotsNeeded}, (_, k) => startIdx + k).every(j => !busySet.has(j));
 
   if (!stillFree) {
     btn.disabled = false;
     btn.textContent = 'Επιβεβαίωση Ραντεβού';
     alert('Λυπούμαστε, αυτή η ώρα μόλις κρατήθηκε. Παρακαλώ επιλέξτε άλλη ώρα.');
-    showStep(3);
+    showStep(4);
     await loadSlots();
     return;
   }
 
   try {
     const { error } = await supa.from('appointments').insert({
-      scheduled_at: scheduledAt,
+      scheduled_at:  scheduledAt,
       customer_name: name,
       customer_phone: phone,
-      services: servicesText,
-      duration_min: totalDuration,
+      services:      servicesText,
+      duration_min:  totalDuration,
       notes,
+      plate,
+      vehicle_type:  selectedVehicleType,
+      brand,
+      model,
       status: 'pending',
       source: 'online'
     });
     if (error) throw error;
 
+    const vtDef = VEHICLE_TYPE_DEFS.find(v => v.key === selectedVehicleType);
+    const mult  = PRICE_MULTIPLIERS[selectedVehicleType] || 1.0;
+    const total = selectedServices.reduce((sum, s) => sum + Math.round(s.basePrice * mult * 100) / 100, 0);
     const dateDisplay = `${selectedDate.getDate()} ${MONTH_NAMES_GEN[selectedDate.getMonth()]} ${selectedDate.getFullYear()}`;
+
     document.getElementById('successDetail').innerHTML = `
       <div class="success-detail-row"><span class="success-detail-label">Ημερομηνία</span><span class="success-detail-val">${dateDisplay}</span></div>
       <div class="success-detail-row"><span class="success-detail-label">Ώρα</span><span class="success-detail-val">${selectedSlot}</span></div>
+      <div class="success-detail-row"><span class="success-detail-label">Πινακίδα</span><span class="success-detail-val">${plate}</span></div>
+      ${(brand||model) ? `<div class="success-detail-row"><span class="success-detail-label">Όχημα</span><span class="success-detail-val">${[brand,model,vtDef?.label].filter(Boolean).join(' ')}</span></div>` : ''}
       ${servicesText ? `<div class="success-detail-row"><span class="success-detail-label">Υπηρεσίες</span><span class="success-detail-val">${servicesText}</span></div>` : ''}
+      ${total > 0 ? `<div class="success-detail-row"><span class="success-detail-label">Εκτίμηση</span><span class="success-detail-val" style="color:#0F4C81">~${total.toFixed(0)}€ *</span></div>` : ''}
       <div class="success-detail-row"><span class="success-detail-label">Όνομα</span><span class="success-detail-val">${name}</span></div>
-      <div class="success-detail-row"><span class="success-detail-label">Τηλέφωνο</span><span class="success-detail-val">${phone}</span></div>`;
+      <div class="success-detail-row"><span class="success-detail-label">Τηλέφωνο</span><span class="success-detail-val">${phone}</span></div>
+      ${total > 0 ? `<div style="font-size:0.75rem;color:#64748B;margin-top:8px">* Η τιμή ενδέχεται να τροποποιηθεί ανάλογα με την κατάσταση του οχήματος.</div>` : ''}`;
+
     showStep('done');
     updateDots('done');
   } catch (e) {
@@ -761,7 +769,7 @@ function showStep(n) {
 }
 
 function updateDots(step) {
-  [1,2,3,4,5].forEach(i => {
+  [1,2,3,4,5,6].forEach(i => {
     const dot = document.getElementById('dot' + i);
     if (!dot) return;
     if (step === 'done') { dot.className = 'progress-dot done'; return; }
@@ -772,7 +780,12 @@ function updateDots(step) {
 function resetBooking() {
   selectedDate = null;
   selectedServices = [];
+  selectedVehicleType = null;
   selectedSlot = null;
+  ['bookPlate','bookBrand','bookModel','bookName','bookPhone','bookNotes'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
   showStep(1);
   updateDots(1);
   buildDateGrid();
@@ -781,7 +794,6 @@ function resetBooking() {
 // ─── Init ─────────────────────────────────────────────────────────────────────
 buildDateGrid();
 
-// Pre-fetch shop config immediately to populate shop name
 (async () => {
   try {
     const { data } = await supa.from('shop_config').select('shop_name, services').eq('id', 'default').single();

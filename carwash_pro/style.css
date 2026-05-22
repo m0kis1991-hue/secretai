@@ -1406,6 +1406,8 @@ select.form-control { cursor: pointer; }
 .btn-appt-confirm:hover { background: rgba(0,196,122,0.3); }
 .btn-appt-cancel { background: rgba(239,68,68,0.12); color: var(--red); }
 .btn-appt-cancel:hover { background: rgba(239,68,68,0.25); }
+.btn-appt-convert { background: rgba(15,76,129,0.1); color: var(--blue); }
+.btn-appt-convert:hover { background: rgba(15,76,129,0.22); }
 
 /* Booking link card */
 .booking-link-card {

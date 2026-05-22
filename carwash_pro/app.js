@@ -1550,19 +1550,21 @@ function renderAppointmentsPage() {
     }
     const statusClass = { confirmed:'appt-slot-confirmed', cancelled:'appt-slot-cancelled', pending:'appt-slot-pending' }[appt.status] || 'appt-slot-pending';
     const statusLabel = { confirmed:'Επιβεβαιωμένο', cancelled:'Ακυρωμένο', pending:'Εκκρεμεί' }[appt.status] || appt.status;
-    const durLabel = slotsNeeded > 1 ? ` · ${slotsNeeded} ώρες` : '';
+    const vehicleLine = [appt.plate, [appt.brand, appt.model].filter(Boolean).join(' '), appt.vehicle_type ? VEHICLE_LABELS[appt.vehicle_type] : ''].filter(Boolean).join(' · ');
     return `
       <div class="appt-slot ${statusClass}">
         <div class="appt-slot-time">${slot}${slotsNeeded > 1 ? `<div style="font-size:0.65rem;color:var(--text3);margin-top:1px">${slotsNeeded} ώρ.</div>` : ''}</div>
         <div class="appt-slot-info">
           <div class="appt-slot-name">${appt.customer_name}</div>
           <div class="appt-slot-phone">${appt.customer_phone}</div>
-          ${appt.services ? `<div class="appt-slot-notes" style="color:var(--blue)">${appt.services}</div>` : ''}
-          ${appt.notes ? `<div class="appt-slot-notes">${appt.notes}</div>` : ''}
+          ${vehicleLine ? `<div class="appt-slot-notes" style="font-weight:600;color:var(--blue)">${vehicleLine}</div>` : ''}
+          ${appt.services ? `<div class="appt-slot-notes">${appt.services}</div>` : ''}
+          ${appt.notes ? `<div class="appt-slot-notes" style="color:var(--text2)">${appt.notes}</div>` : ''}
           <span class="appt-source-tag">${appt.source === 'online' ? '🌐 Online' : '📞 Χειροκίνητο'}</span>
         </div>
         <div class="appt-slot-actions">
           <span class="appt-status-badge appt-status-${appt.status}">${statusLabel}</span>
+          ${appt.status !== 'cancelled' ? `<button class="btn-appt-convert" onclick="convertApptToJob('${appt.id}')" title="Δημιουργία εργασίας">➕</button>` : ''}
           ${appt.status === 'pending' ? `
             <button class="btn-appt-confirm" onclick="updateApptStatus('${appt.id}','confirmed')">✓</button>
             <button class="btn-appt-cancel" onclick="updateApptStatus('${appt.id}','cancelled')">✗</button>` : ''}
@@ -1648,6 +1650,47 @@ async function updateApptStatus(apptId, newStatus) {
   } catch (e) {
     showToast('Σφάλμα ενημέρωσης', 'error');
   }
+}
+
+function convertApptToJob(apptId) {
+  const appt = appointments.find(a => a.id === apptId);
+  if (!appt) return;
+
+  // Pre-fill the new job form with appointment data
+  showPage('newJob');
+
+  // Plate & vehicle
+  const plateEl = document.getElementById('plateInput');
+  if (plateEl) { plateEl.value = appt.plate || ''; plateEl.dispatchEvent(new Event('input')); }
+  if (appt.brand) {
+    const brandEl = document.getElementById('brandSelect');
+    if (brandEl) brandEl.value = appt.brand;
+    form.brand = appt.brand;
+  }
+  const modelEl = document.getElementById('modelInput');
+  if (modelEl) modelEl.value = appt.model || '';
+  form.model = appt.model || '';
+  form.plate = appt.plate || '';
+
+  if (appt.vehicle_type) {
+    const vtBtn = document.querySelector(`.vtype-btn[data-type="${appt.vehicle_type}"]`);
+    if (vtBtn) selectVehicleType(vtBtn);
+  }
+
+  // Customer
+  const nameEl = document.getElementById('customerName');
+  if (nameEl) nameEl.value = appt.customer_name || '';
+  form.customerName = appt.customer_name || '';
+  const phoneEl = document.getElementById('customerPhone');
+  if (phoneEl) phoneEl.value = appt.customer_phone || '';
+  form.customerPhone = appt.customer_phone || '';
+
+  // Notes (include appointment services as note hint)
+  const notesEl = document.getElementById('customerNotes');
+  const noteHint = [appt.services, appt.notes].filter(Boolean).join(' · ');
+  if (notesEl && noteHint) notesEl.value = noteHint;
+
+  showToast('Στοιχεία ραντεβού φορτώθηκαν', 'success');
 }
 
 function copyBookingLink() {
