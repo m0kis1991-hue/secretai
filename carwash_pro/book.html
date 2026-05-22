@@ -490,7 +490,12 @@ function selectDate(idx, isoStr) {
 async function goStep2() {
   if (!selectedDate) { alert('Παρακαλώ επιλέξτε ημερομηνία'); return; }
   showStep(2);
-  if (!shopServicesLoaded) await loadShopServices();
+  const container = document.getElementById('servicesContainer');
+  if (shopServicesLoaded) {
+    renderServices(container);
+  } else {
+    await loadShopServices();
+  }
 }
 
 // ─── Services ─────────────────────────────────────────────────────────────────
