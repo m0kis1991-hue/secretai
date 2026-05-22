@@ -101,7 +101,8 @@ function updateClock() {
   const months = ['Ιαν','Φεβ','Μαρ','Απρ','Μαΐ','Ιουν','Ιουλ','Αυγ','Σεπ','Οκτ','Νοε','Δεκ'];
   const pad = n => String(n).padStart(2, '0');
   const dateStr = `${days[now.getDay()]} ${now.getDate()} ${months[now.getMonth()]}`;
-  document.getElementById('topDate').textContent = dateStr;
+  const topDate = document.getElementById('topDate');
+  if (topDate) topDate.textContent = dateStr;
   const dashDay = document.getElementById('dashDay');
   if (dashDay) dashDay.innerHTML = `${days[now.getDay()]}<br>${now.getDate()} ${months[now.getMonth()]}`;
   const h = now.getHours();
