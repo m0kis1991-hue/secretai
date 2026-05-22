@@ -30,7 +30,7 @@ body {
   gap: 10px;
   margin-bottom: 10px;
 }
-.book-title {
+.book-shop-name {
   font-family: 'Syne', sans-serif;
   font-weight: 800;
   font-size: 1.35rem;
@@ -47,16 +47,11 @@ body {
   padding: 20px 16px 40px;
 }
 
-.step {
-  display: none;
-}
-.step.active {
-  display: block;
-  animation: fadeUp 0.25s ease;
-}
+.step { display: none; }
+.step.active { display: block; animation: fadeUp 0.25s ease; }
 @keyframes fadeUp {
   from { opacity: 0; transform: translateY(12px); }
-  to { opacity: 1; transform: translateY(0); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 .step-title {
@@ -88,6 +83,66 @@ body {
 .date-btn .day-name { font-size: 0.72rem; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.5px; }
 .date-btn .day-num { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 1.1rem; }
 .date-btn .month-name { font-size: 0.72rem; opacity: 0.7; }
+
+/* Service cards */
+.services-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+.svc-card {
+  background: white;
+  border: 2px solid #E2E8F0;
+  border-radius: 12px;
+  padding: 14px 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  transition: all 0.15s;
+}
+.svc-card:hover { border-color: #0F4C81; }
+.svc-card.selected { border-color: #0F4C81; background: #f0f7ff; }
+.svc-card.selected .svc-check { background: #0F4C81; border-color: #0F4C81; }
+.svc-card.selected .svc-check::after { display: block; }
+.svc-check {
+  width: 22px; height: 22px;
+  border: 2px solid #CBD5E1;
+  border-radius: 6px;
+  flex-shrink: 0;
+  position: relative;
+  transition: all 0.15s;
+}
+.svc-check::after {
+  content: '';
+  display: none;
+  position: absolute;
+  left: 4px; top: 1px;
+  width: 8px; height: 12px;
+  border: 2.5px solid white;
+  border-top: none;
+  border-left: none;
+  transform: rotate(45deg);
+}
+.svc-info { flex: 1; }
+.svc-name { font-weight: 600; font-size: 0.92rem; color: #1E293B; }
+.svc-meta { font-size: 0.78rem; color: #64748B; margin-top: 2px; }
+.svc-price {
+  font-family: 'Syne', sans-serif;
+  font-weight: 700;
+  font-size: 1rem;
+  color: #0F4C81;
+  flex-shrink: 0;
+}
+.svc-card.selected .svc-price { color: #0a2f52; }
+
+.duration-bar {
+  background: #f0f7ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  font-size: 0.85rem;
+  color: #0F4C81;
+  display: none;
+}
+.duration-bar strong { font-family: 'Syne', sans-serif; font-weight: 700; }
 
 /* Time slots */
 .slots-grid {
@@ -155,6 +210,14 @@ body {
 }
 .summary-row:last-child { border-bottom: none; }
 .summary-row strong { color: #1E293B; }
+.summary-services-list {
+  font-size: 0.82rem;
+  color: #1E293B;
+  font-weight: 600;
+  text-align: right;
+  max-width: 55%;
+  line-height: 1.5;
+}
 
 /* Buttons */
 .btn-primary {
@@ -239,10 +302,7 @@ body {
   border-radius: 16px;
   box-shadow: 0 2px 12px rgba(15,76,129,0.08);
 }
-.success-icon {
-  font-size: 3rem;
-  margin-bottom: 16px;
-}
+.success-icon { font-size: 3rem; margin-bottom: 16px; }
 .success-title {
   font-family: 'Syne', sans-serif;
   font-weight: 800;
@@ -271,6 +331,16 @@ body {
 }
 .success-detail-label { color: #64748B; min-width: 80px; }
 .success-detail-val { font-weight: 600; color: #1E293B; }
+
+.no-services-msg {
+  background: white;
+  border-radius: 12px;
+  padding: 24px;
+  text-align: center;
+  color: #64748B;
+  font-size: 0.9rem;
+  margin-bottom: 16px;
+}
 </style>
 </head>
 <body>
@@ -283,7 +353,7 @@ body {
       <rect x="22" y="28" width="20" height="10" rx="3" fill="white" opacity="0.9"/>
       <rect x="24" y="24" width="16" height="6" rx="2" fill="white" opacity="0.7"/>
     </svg>
-    <span class="book-title">CarWash Pro</span>
+    <span class="book-shop-name" id="headerShopName">CarWash Pro</span>
   </div>
   <div class="book-sub">Κλείστε ραντεβού online — γρήγορα και εύκολα</div>
 </div>
@@ -295,29 +365,45 @@ body {
     <div class="progress-dot" id="dot2"></div>
     <div class="progress-dot" id="dot3"></div>
     <div class="progress-dot" id="dot4"></div>
+    <div class="progress-dot" id="dot5"></div>
   </div>
 
   <!-- Step 1: Pick date -->
   <div class="step active" id="step1">
     <div class="step-title">Επιλέξτε Ημερομηνία</div>
     <div class="date-grid" id="dateGrid"></div>
-    <button class="btn-primary" onclick="goStep2()" id="btnStep1">Επόμενο →</button>
+    <button class="btn-primary" onclick="goStep2()">Επόμενο →</button>
   </div>
 
-  <!-- Step 2: Pick time -->
+  <!-- Step 2: Pick services -->
   <div class="step" id="step2">
+    <div class="step-title">Επιλέξτε Υπηρεσίες</div>
+    <div id="servicesContainer">
+      <div class="loading-slots"><div class="spinner"></div>Φόρτωση υπηρεσιών...</div>
+    </div>
+    <div class="duration-bar" id="durationBar">
+      Εκτιμώμενος χρόνος: <strong id="durationText">—</strong>
+    </div>
+    <div class="step-nav">
+      <button class="btn-secondary" onclick="showStep(1)">← Πίσω</button>
+      <button class="btn-primary" onclick="goStep3()">Επόμενο →</button>
+    </div>
+  </div>
+
+  <!-- Step 3: Pick time -->
+  <div class="step" id="step3">
     <div class="step-title">Επιλέξτε Ώρα</div>
     <div id="slotsContainer">
       <div class="loading-slots"><div class="spinner"></div>Φόρτωση διαθέσιμων ωρών...</div>
     </div>
     <div class="step-nav">
-      <button class="btn-secondary" onclick="showStep(1)">← Πίσω</button>
-      <button class="btn-primary" onclick="goStep3()" id="btnStep2">Επόμενο →</button>
+      <button class="btn-secondary" onclick="showStep(2)">← Πίσω</button>
+      <button class="btn-primary" onclick="goStep4()" id="btnStep3">Επόμενο →</button>
     </div>
   </div>
 
-  <!-- Step 3: Fill info -->
-  <div class="step" id="step3">
+  <!-- Step 4: Fill info -->
+  <div class="step" id="step4">
     <div class="step-title">Στοιχεία Επικοινωνίας</div>
     <div class="form-group">
       <label>Ονοματεπώνυμο</label>
@@ -329,20 +415,20 @@ body {
     </div>
     <div class="form-group">
       <label>Σημειώσεις (προαιρετικό)</label>
-      <input type="text" id="bookNotes" class="form-control" placeholder="π.χ. SUV, βαθύς καθαρισμός">
+      <input type="text" id="bookNotes" class="form-control" placeholder="π.χ. SUV, extra βρώμικο">
     </div>
     <div class="step-nav">
-      <button class="btn-secondary" onclick="showStep(2)">← Πίσω</button>
-      <button class="btn-primary" onclick="goStep4()">Συνέχεια →</button>
+      <button class="btn-secondary" onclick="showStep(3)">← Πίσω</button>
+      <button class="btn-primary" onclick="goStep5()">Συνέχεια →</button>
     </div>
   </div>
 
-  <!-- Step 4: Confirm -->
-  <div class="step" id="step4">
+  <!-- Step 5: Confirm -->
+  <div class="step" id="step5">
     <div class="step-title">Επιβεβαίωση Κράτησης</div>
     <div class="summary-card" id="summaryCard"></div>
     <button class="btn-primary" onclick="submitBooking()" id="btnSubmit">Επιβεβαίωση Ραντεβού</button>
-    <button class="btn-secondary" onclick="showStep(3)">← Πίσω</button>
+    <button class="btn-secondary" onclick="showStep(4)">← Πίσω</button>
   </div>
 
   <!-- Success -->
@@ -370,21 +456,23 @@ const MONTH_NAMES = ['Ιαν','Φεβ','Μαρ','Απρ','Μαΐ','Ιουν','Ι
 const MONTH_NAMES_GEN = ['Ιανουαρίου','Φεβρουαρίου','Μαρτίου','Απριλίου','Μαΐου','Ιουνίου','Ιουλίου','Αυγούστου','Σεπτεμβρίου','Οκτωβρίου','Νοεμβρίου','Δεκεμβρίου'];
 
 let selectedDate = null;
+let selectedServices = [];
 let selectedSlot = null;
-let bookedSlots = [];
+let shopServices = [];
+let shopServicesLoaded = false;
 
-// Build next 7 days (starting tomorrow)
+// ─── Date grid ───────────────────────────────────────────────────────────────
 function buildDateGrid() {
   const grid = document.getElementById('dateGrid');
   const dates = [];
   for (let i = 1; i <= 8; i++) {
     const d = new Date();
     d.setDate(d.getDate() + i);
-    d.setHours(0,0,0,0);
+    d.setHours(0, 0, 0, 0);
     dates.push(d);
   }
   grid.innerHTML = dates.map((d, i) => `
-    <div class="date-btn" id="date-${i}" onclick="selectDate(${i}, '${d.toISOString()}')">
+    <div class="date-btn" id="date-${i}" onclick="selectDate(${i},'${d.toISOString()}')">
       <div class="day-name">${DAY_NAMES_SHORT[d.getDay()]}</div>
       <div class="day-num">${d.getDate()}</div>
       <div class="month-name">${MONTH_NAMES[d.getMonth()]}</div>
@@ -402,9 +490,89 @@ function selectDate(idx, isoStr) {
 async function goStep2() {
   if (!selectedDate) { alert('Παρακαλώ επιλέξτε ημερομηνία'); return; }
   showStep(2);
-  await loadSlots();
+  if (!shopServicesLoaded) await loadShopServices();
 }
 
+// ─── Services ─────────────────────────────────────────────────────────────────
+async function loadShopServices() {
+  const container = document.getElementById('servicesContainer');
+  try {
+    const { data } = await supa.from('shop_config').select('shop_name, services').eq('id', 'default').single();
+    if (data) {
+      if (data.shop_name) document.getElementById('headerShopName').textContent = data.shop_name;
+      shopServices = Array.isArray(data.services) ? data.services : [];
+    }
+  } catch (e) {}
+  shopServicesLoaded = true;
+  renderServices(container);
+}
+
+function renderServices(container) {
+  if (shopServices.length === 0) {
+    container.innerHTML = `<div class="no-services-msg">
+      <div style="font-size:1.8rem;margin-bottom:8px">🚿</div>
+      <p>Δεν έχουν οριστεί διαθέσιμες υπηρεσίες.<br>Επικοινωνήστε απευθείας με το κατάστημα.</p>
+    </div>`;
+    return;
+  }
+  container.innerHTML = `<div class="services-list">${shopServices.map(s => `
+    <div class="svc-card" id="svc-${s.id}" onclick="toggleService('${s.id}')">
+      <div class="svc-check"></div>
+      <div class="svc-info">
+        <div class="svc-name">${s.name}</div>
+        <div class="svc-meta">~${s.duration} λεπτά</div>
+      </div>
+      <div class="svc-price">${(s.basePrice || 0).toFixed(0)}€</div>
+    </div>`).join('')}
+  </div>`;
+}
+
+function toggleService(id) {
+  const svc = shopServices.find(s => s.id === id);
+  if (!svc) return;
+  const el = document.getElementById('svc-' + id);
+  const idx = selectedServices.findIndex(s => s.id === id);
+  if (idx >= 0) {
+    selectedServices.splice(idx, 1);
+    el.classList.remove('selected');
+  } else {
+    selectedServices.push(svc);
+    el.classList.add('selected');
+  }
+  updateDurationBar();
+}
+
+function updateDurationBar() {
+  const total = getTotalDuration();
+  const bar = document.getElementById('durationBar');
+  if (total > 0) {
+    bar.style.display = 'block';
+    const hours = Math.floor(total / 60);
+    const mins = total % 60;
+    let txt = '';
+    if (hours > 0) txt += hours + ' ώρ' + (hours > 1 ? 'ες' : 'α');
+    if (mins > 0) txt += (hours > 0 ? ' ' : '') + mins + ' λεπτά';
+    document.getElementById('durationText').textContent = txt;
+  } else {
+    bar.style.display = 'none';
+  }
+  selectedSlot = null;
+}
+
+function getTotalDuration() {
+  return selectedServices.reduce((s, svc) => s + (svc.duration || 60), 0);
+}
+
+function goStep3() {
+  if (shopServices.length > 0 && selectedServices.length === 0) {
+    alert('Παρακαλώ επιλέξτε τουλάχιστον μία υπηρεσία');
+    return;
+  }
+  showStep(3);
+  loadSlots();
+}
+
+// ─── Slots ────────────────────────────────────────────────────────────────────
 function dayRange(date) {
   const start = new Date(date); start.setHours(0, 0, 0, 0);
   const end = new Date(date); end.setHours(23, 59, 59, 999);
@@ -426,18 +594,46 @@ function buildScheduledAt(date, slot) {
 async function loadSlots() {
   const container = document.getElementById('slotsContainer');
   container.innerHTML = '<div class="loading-slots"><div class="spinner"></div>Φόρτωση...</div>';
+
+  const totalDuration = Math.max(getTotalDuration(), 60);
+  const slotsNeeded = Math.ceil(totalDuration / 60);
+
   try {
     const { start, end } = dayRange(selectedDate);
     const { data } = await supa.from('appointments')
-      .select('scheduled_at')
+      .select('scheduled_at, duration_min')
       .gte('scheduled_at', start)
       .lte('scheduled_at', end)
       .neq('status', 'cancelled');
-    bookedSlots = (data || []).map(r => slotFromScheduledAt(r.scheduled_at));
-    container.innerHTML = `<div class="slots-grid">${ALL_SLOTS.map(slot => {
-      const busy = bookedSlots.includes(slot);
-      return `<div class="slot-btn ${busy ? 'booked' : ''}" ${busy ? '' : `onclick="selectSlot('${slot}',this)"`}>${slot}${busy ? '<br><span style="font-size:0.65rem;font-weight:400">Κρατημένο</span>' : ''}</div>`;
-    }).join('')}</div>`;
+
+    // Mark all occupied slot indices as busy
+    const busySet = new Set();
+    (data || []).forEach(r => {
+      const startSlot = slotFromScheduledAt(r.scheduled_at);
+      const startIdx = ALL_SLOTS.indexOf(startSlot);
+      if (startIdx === -1) return;
+      const apptSlots = Math.max(Math.ceil((r.duration_min || 60) / 60), 1);
+      for (let k = 0; k < apptSlots; k++) {
+        if (startIdx + k < ALL_SLOTS.length) busySet.add(startIdx + k);
+      }
+    });
+
+    // Build slot buttons — a slot is available if all slotsNeeded consecutive slots are free
+    const html = ALL_SLOTS.map((slot, idx) => {
+      if (idx + slotsNeeded > ALL_SLOTS.length) {
+        return `<div class="slot-btn booked">${slot}<br><span style="font-size:0.6rem;font-weight:400">Μη διαθ.</span></div>`;
+      }
+      const free = Array.from({length: slotsNeeded}, (_, k) => idx + k).every(j => !busySet.has(j));
+      if (!free) {
+        return `<div class="slot-btn booked">${slot}<br><span style="font-size:0.6rem;font-weight:400">Κρατημένο</span></div>`;
+      }
+      return `<div class="slot-btn" onclick="selectSlot('${slot}',this)">${slot}${slotsNeeded > 1 ? `<br><span style="font-size:0.62rem;font-weight:400;opacity:0.75">+${slotsNeeded-1}ω</span>` : ''}</div>`;
+    }).join('');
+
+    container.innerHTML = `<div class="slots-grid">${html}</div>`;
+    if (slotsNeeded > 1) {
+      container.innerHTML += `<p style="font-size:0.78rem;color:#64748B;margin-bottom:14px;text-align:center">Η υπηρεσία δεσμεύει ${slotsNeeded} συνεχόμενες ώρες</p>`;
+    }
   } catch (e) {
     container.innerHTML = '<div class="loading-slots">Σφάλμα φόρτωσης. Δοκιμάστε ξανά.</div>';
   }
@@ -449,28 +645,37 @@ function selectSlot(slot, el) {
   selectedSlot = slot;
 }
 
-function goStep3() {
+function goStep4() {
   if (!selectedSlot) { alert('Παρακαλώ επιλέξτε ώρα'); return; }
-  showStep(3);
+  showStep(4);
   setTimeout(() => document.getElementById('bookName').focus(), 100);
 }
 
-function goStep4() {
+// ─── Info ─────────────────────────────────────────────────────────────────────
+function goStep5() {
   const name = document.getElementById('bookName').value.trim();
   const phone = document.getElementById('bookPhone').value.trim();
   if (!name) { alert('Παρακαλώ συμπληρώστε το όνομά σας'); return; }
   if (!phone) { alert('Παρακαλώ συμπληρώστε το τηλέφωνό σας'); return; }
 
   const dateStr = `${selectedDate.getDate()} ${MONTH_NAMES_GEN[selectedDate.getMonth()]} ${selectedDate.getFullYear()}`;
+  const svcNames = selectedServices.length > 0
+    ? selectedServices.map(s => s.name).join(', ')
+    : '—';
+  const totalPrice = selectedServices.reduce((s, svc) => s + (svc.basePrice || 0), 0);
+
   document.getElementById('summaryCard').innerHTML = `
     <div class="summary-row"><span>Ημερομηνία</span><strong>${dateStr}</strong></div>
     <div class="summary-row"><span>Ώρα</span><strong>${selectedSlot}</strong></div>
+    <div class="summary-row"><span>Υπηρεσίες</span><div class="summary-services-list">${svcNames}</div></div>
+    ${totalPrice > 0 ? `<div class="summary-row"><span>Εκτιμώμενη τιμή</span><strong>${totalPrice.toFixed(0)}€</strong></div>` : ''}
     <div class="summary-row"><span>Όνομα</span><strong>${name}</strong></div>
     <div class="summary-row"><span>Τηλέφωνο</span><strong>${phone}</strong></div>`;
 
-  showStep(4);
+  showStep(5);
 }
 
+// ─── Submit ───────────────────────────────────────────────────────────────────
 async function submitBooking() {
   const btn = document.getElementById('btnSubmit');
   btn.disabled = true;
@@ -480,21 +685,34 @@ async function submitBooking() {
   const phone = document.getElementById('bookPhone').value.trim();
   const notes = document.getElementById('bookNotes').value.trim();
 
+  const totalDuration = Math.max(getTotalDuration(), 60);
+  const slotsNeeded = Math.ceil(totalDuration / 60);
   const scheduledAt = buildScheduledAt(selectedDate, selectedSlot);
+  const servicesText = selectedServices.map(s => s.name).join(', ');
 
-  // Double-check slot still free
+  // Double-check all needed slots are still free
   const { start, end } = dayRange(selectedDate);
   const { data: check } = await supa.from('appointments')
-    .select('id')
+    .select('scheduled_at, duration_min')
     .gte('scheduled_at', start)
     .lte('scheduled_at', end)
     .neq('status', 'cancelled');
-  const stillBusy = (check || []).some(r => slotFromScheduledAt(r.scheduled_at) === selectedSlot);
-  if (stillBusy) {
+
+  const busySet = new Set();
+  (check || []).forEach(r => {
+    const si = ALL_SLOTS.indexOf(slotFromScheduledAt(r.scheduled_at));
+    if (si === -1) return;
+    const n = Math.max(Math.ceil((r.duration_min || 60) / 60), 1);
+    for (let k = 0; k < n; k++) { if (si + k < ALL_SLOTS.length) busySet.add(si + k); }
+  });
+  const startIdx = ALL_SLOTS.indexOf(selectedSlot);
+  const stillFree = Array.from({length: slotsNeeded}, (_, k) => startIdx + k).every(j => !busySet.has(j));
+
+  if (!stillFree) {
     btn.disabled = false;
     btn.textContent = 'Επιβεβαίωση Ραντεβού';
     alert('Λυπούμαστε, αυτή η ώρα μόλις κρατήθηκε. Παρακαλώ επιλέξτε άλλη ώρα.');
-    showStep(2);
+    showStep(3);
     await loadSlots();
     return;
   }
@@ -502,8 +720,13 @@ async function submitBooking() {
   try {
     const { error } = await supa.from('appointments').insert({
       scheduled_at: scheduledAt,
-      customer_name: name, customer_phone: phone,
-      notes, status: 'pending', source: 'online'
+      customer_name: name,
+      customer_phone: phone,
+      services: servicesText,
+      duration_min: totalDuration,
+      notes,
+      status: 'pending',
+      source: 'online'
     });
     if (error) throw error;
 
@@ -511,6 +734,7 @@ async function submitBooking() {
     document.getElementById('successDetail').innerHTML = `
       <div class="success-detail-row"><span class="success-detail-label">Ημερομηνία</span><span class="success-detail-val">${dateDisplay}</span></div>
       <div class="success-detail-row"><span class="success-detail-label">Ώρα</span><span class="success-detail-val">${selectedSlot}</span></div>
+      ${servicesText ? `<div class="success-detail-row"><span class="success-detail-label">Υπηρεσίες</span><span class="success-detail-val">${servicesText}</span></div>` : ''}
       <div class="success-detail-row"><span class="success-detail-label">Όνομα</span><span class="success-detail-val">${name}</span></div>
       <div class="success-detail-row"><span class="success-detail-label">Τηλέφωνο</span><span class="success-detail-val">${phone}</span></div>`;
     showStep('done');
@@ -522,6 +746,7 @@ async function submitBooking() {
   }
 }
 
+// ─── Navigation ───────────────────────────────────────────────────────────────
 function showStep(n) {
   document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
   const id = n === 'done' ? 'stepDone' : 'step' + n;
@@ -531,7 +756,7 @@ function showStep(n) {
 }
 
 function updateDots(step) {
-  [1,2,3,4].forEach(i => {
+  [1,2,3,4,5].forEach(i => {
     const dot = document.getElementById('dot' + i);
     if (!dot) return;
     if (step === 'done') { dot.className = 'progress-dot done'; return; }
@@ -541,13 +766,27 @@ function updateDots(step) {
 
 function resetBooking() {
   selectedDate = null;
+  selectedServices = [];
   selectedSlot = null;
   showStep(1);
   updateDots(1);
   buildDateGrid();
 }
 
+// ─── Init ─────────────────────────────────────────────────────────────────────
 buildDateGrid();
+
+// Pre-fetch shop config immediately to populate shop name
+(async () => {
+  try {
+    const { data } = await supa.from('shop_config').select('shop_name, services').eq('id', 'default').single();
+    if (data?.shop_name) document.getElementById('headerShopName').textContent = data.shop_name;
+    if (Array.isArray(data?.services)) {
+      shopServices = data.services;
+      shopServicesLoaded = true;
+    }
+  } catch (e) {}
+})();
 </script>
 </body>
 </html>

@@ -1515,23 +1515,48 @@ function renderAppointmentsPage() {
   const linkEl = document.getElementById('bookingLinkUrl');
   if (linkEl) linkEl.textContent = window.location.origin + '/book.html';
 
-  container.innerHTML = APPT_SLOTS.map(slot => {
-    const appt = appointments.find(a => apptSlotFromDate(a.scheduled_at) === slot);
-    if (!appt) {
+  // Build slot occupancy map: slotIndex → appointment that owns it
+  const slotMap = {};
+  appointments.forEach(appt => {
+    const startSlot = apptSlotFromDate(appt.scheduled_at);
+    const startIdx = APPT_SLOTS.indexOf(startSlot);
+    if (startIdx === -1) return;
+    const slotsNeeded = Math.max(Math.ceil((appt.duration_min || 60) / 60), 1);
+    for (let k = 0; k < slotsNeeded; k++) {
+      if (startIdx + k < APPT_SLOTS.length) {
+        slotMap[startIdx + k] = { appt, isStart: k === 0, slotsNeeded };
+      }
+    }
+  });
+
+  container.innerHTML = APPT_SLOTS.map((slot, idx) => {
+    const entry = slotMap[idx];
+    if (!entry) {
       return `
         <div class="appt-slot appt-slot-free" onclick="openApptModal('${slot}')">
           <div class="appt-slot-time">${slot}</div>
           <div class="appt-slot-free-label">Ελεύθερο</div>
         </div>`;
     }
+    const { appt, isStart, slotsNeeded } = entry;
+    if (!isStart) {
+      // Continuation slot — show as blocked
+      return `
+        <div class="appt-slot appt-slot-continuation">
+          <div class="appt-slot-time">${slot}</div>
+          <div class="appt-slot-free-label" style="color:var(--text3)">↑ Συνέχεια ραντεβού</div>
+        </div>`;
+    }
     const statusClass = { confirmed:'appt-slot-confirmed', cancelled:'appt-slot-cancelled', pending:'appt-slot-pending' }[appt.status] || 'appt-slot-pending';
     const statusLabel = { confirmed:'Επιβεβαιωμένο', cancelled:'Ακυρωμένο', pending:'Εκκρεμεί' }[appt.status] || appt.status;
+    const durLabel = slotsNeeded > 1 ? ` · ${slotsNeeded} ώρες` : '';
     return `
       <div class="appt-slot ${statusClass}">
-        <div class="appt-slot-time">${slot}</div>
+        <div class="appt-slot-time">${slot}${slotsNeeded > 1 ? `<div style="font-size:0.65rem;color:var(--text3);margin-top:1px">${slotsNeeded} ώρ.</div>` : ''}</div>
         <div class="appt-slot-info">
           <div class="appt-slot-name">${appt.customer_name}</div>
           <div class="appt-slot-phone">${appt.customer_phone}</div>
+          ${appt.services ? `<div class="appt-slot-notes" style="color:var(--blue)">${appt.services}</div>` : ''}
           ${appt.notes ? `<div class="appt-slot-notes">${appt.notes}</div>` : ''}
           <span class="appt-source-tag">${appt.source === 'online' ? '🌐 Online' : '📞 Χειροκίνητο'}</span>
         </div>
@@ -1570,7 +1595,15 @@ function openApptModal(timeSlot) {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
+  _apptManualDuration = 60;
+  document.querySelectorAll('.appt-dur-btn').forEach((b, i) => b.classList.toggle('active', i === 0));
   setTimeout(() => { const el = document.getElementById('apptModalName'); if (el) el.focus(); }, 100);
+}
+
+function setApptDuration(minutes, btn) {
+  _apptManualDuration = minutes;
+  document.querySelectorAll('.appt-dur-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
 }
 
 function closeApptModal() {
@@ -1591,7 +1624,8 @@ async function createManualAppointment() {
     const { error } = await getSupa().from('appointments').insert({
       scheduled_at: apptBuildScheduledAt(apptSelectedDate, timeSlot),
       customer_name: name, customer_phone: phone,
-      notes, status: 'confirmed', source: 'manual'
+      notes, duration_min: _apptManualDuration,
+      status: 'confirmed', source: 'manual'
     });
     if (error) throw error;
     closeApptModal();

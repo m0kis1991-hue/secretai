@@ -694,6 +694,15 @@
         <input type="tel" id="apptModalPhone" class="form-control" placeholder="69XXXXXXXX">
       </div>
       <div class="form-group">
+        <label>Διάρκεια</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="appt-dur-btn active" onclick="setApptDuration(60,this)">1 ώρα</button>
+          <button class="appt-dur-btn" onclick="setApptDuration(120,this)">2 ώρες</button>
+          <button class="appt-dur-btn" onclick="setApptDuration(180,this)">3 ώρες</button>
+          <button class="appt-dur-btn" onclick="setApptDuration(240,this)">4 ώρες</button>
+        </div>
+      </div>
+      <div class="form-group">
         <label>Σημειώσεις (προαιρετικό)</label>
         <input type="text" id="apptModalNotes" class="form-control" placeholder="π.χ. SUV, βαθύς καθαρισμός">
       </div>

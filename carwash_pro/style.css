@@ -1821,6 +1821,28 @@ select.form-control { cursor: pointer; }
   margin-top: 1px;
 }
 
+/* Continuation slot (blocked by multi-hour appointment) */
+.appt-slot-continuation {
+  background: var(--surface2);
+  border-left: 3px solid var(--border);
+  opacity: 0.65;
+}
+
+/* Appointment duration buttons */
+.appt-dur-btn {
+  background: var(--surface2);
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text2);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.appt-dur-btn:hover { border-color: var(--blue); color: var(--blue); }
+.appt-dur-btn.active { background: var(--blue); border-color: var(--blue); color: white; }
+
 /* Toggle switch */
 .toggle-switch { position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0; }
 .toggle-switch input { opacity: 0; width: 0; height: 0; }
