@@ -43,7 +43,9 @@ Field codes printed on this inner page:
 ═══ PAGE: ΟΝΟΜΑΣΤΙΚΑ ΣΤΟΙΧΕΙΑ (Personal Data) ═══
   (C.1.1) = ΕΠΩΝΥΜΟ = holder's SURNAME (family name)
   (C.1.2) = ΜΙΚΡΟ ΟΝΟΜΑ = holder's FIRST NAME(S)
-  Combine as "Firstname Lastname" (C.1.2 space C.1.1)
+  ⚠ Copy the name EXACTLY as printed — in Greek capital letters (e.g. ΓΕΩΡΓΙΟΣ ΠΑΠΑΔΟΠΟΥΛΟΣ).
+  Do NOT transliterate to Latin characters. Do NOT translate.
+  Combine as "C.1.2 C.1.1" (first name then surname, space-separated).
 
 Return ONLY a valid JSON object — no markdown, no explanation, no extra text (use null for any field not clearly visible):`;
 
@@ -58,7 +60,7 @@ const JSON_TEMPLATE = `
   "fuel": "one of exactly: gasoline, diesel, lpg, hybrid, electric",
   "color": "colour in Greek exactly as printed in field R",
   "type": "one of exactly: car, moto, boat, truck",
-  "ownerName": "Firstname Lastname — C.1.2 then C.1.1",
+  "ownerName": "ΜΙΚΡΟ_ΟΝΟΜΑ ΕΠΩΝΥΜΟ in Greek capitals exactly as printed — e.g. ΓΕΩΡΓΙΟΣ ΠΑΠΑΔΟΠΟΥΛΟΣ",
   "mileage": null
 }`;
 
