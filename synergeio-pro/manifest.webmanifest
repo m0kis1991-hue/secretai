@@ -1,0 +1,41 @@
+{
+  "name": "GearLog - Διαχείριση Service",
+  "short_name": "GearLog",
+  "description": "Εφαρμογή διαχείρισης πελατών, οχημάτων και service για συνεργεία αυτοκινήτων, μηχανών και σκαφών.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f172a",
+  "theme_color": "#1d4ed8",
+  "lang": "el",
+  "categories": ["business", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Νέο Service",
+      "short_name": "Service",
+      "url": "./index.html#/services/new",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Υπενθυμίσεις",
+      "short_name": "Reminders",
+      "url": "./index.html#/reminders",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

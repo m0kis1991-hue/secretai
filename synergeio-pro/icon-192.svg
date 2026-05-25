@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" width="192" height="192">
+  <defs>
+    <linearGradient id="nb" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0d1b35"/>
+      <stop offset="100%" stop-color="#091526"/>
+    </linearGradient>
+    <linearGradient id="bl" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#1d4ed8"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="192" height="192" rx="36" fill="url(#nb)"/>
+
+  <!-- GEAR (behind clipboard), center (96,78) -->
+  <circle cx="96" cy="78" r="44" fill="none" stroke="#b4c0d0" stroke-width="10"/>
+  <g transform="translate(96,78)">
+    <rect x="-5" y="-56" width="10" height="12" rx="2" fill="#b4c0d0"/>
+    <rect x="-5" y="-56" width="10" height="12" rx="2" fill="#b4c0d0" transform="rotate(45)"/>
+    <rect x="-5" y="-56" width="10" height="12" rx="2" fill="#b4c0d0" transform="rotate(90)"/>
+    <rect x="-5" y="-56" width="10" height="12" rx="2" fill="#b4c0d0" transform="rotate(135)"/>
+    <rect x="-5" y="-56" width="10" height="12" rx="2" fill="#b4c0d0" transform="rotate(180)"/>
+    <rect x="-5" y="-56" width="10" height="12" rx="2" fill="#b4c0d0" transform="rotate(225)"/>
+    <rect x="-5" y="-56" width="10" height="12" rx="2" fill="#b4c0d0" transform="rotate(270)"/>
+    <rect x="-5" y="-56" width="10" height="12" rx="2" fill="#b4c0d0" transform="rotate(315)"/>
+    <circle r="16" fill="url(#nb)"/>
+  </g>
+
+  <!-- CLIPBOARD body -->
+  <rect x="54" y="34" width="84" height="96" rx="7" fill="white"/>
+
+  <!-- Clip top tab -->
+  <rect x="71" y="26" width="50" height="20" rx="5" fill="url(#bl)"/>
+  <circle cx="96" cy="35" r="6" fill="url(#nb)"/>
+
+  <!-- Checklist row 1 -->
+  <path d="M65,63 L71,70 L81,56" fill="none" stroke="#1d4ed8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="86" y="61" width="40" height="5" rx="2.5" fill="#1d4ed8" opacity="0.65"/>
+
+  <!-- Checklist row 2 -->
+  <path d="M65,79 L71,86 L81,72" fill="none" stroke="#1d4ed8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="86" y="77" width="34" height="5" rx="2.5" fill="#1d4ed8" opacity="0.65"/>
+
+  <!-- Checklist row 3 -->
+  <path d="M65,95 L71,102 L81,88" fill="none" stroke="#1d4ed8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="86" y="93" width="38" height="5" rx="2.5" fill="#1d4ed8" opacity="0.65"/>
+
+  <!-- Checklist row 4 -->
+  <path d="M65,111 L71,118 L81,104" fill="none" stroke="#1d4ed8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="86" y="109" width="30" height="5" rx="2.5" fill="#1d4ed8" opacity="0.65"/>
+
+  <!-- WRENCH overlaid on right of clipboard -->
+  <g transform="translate(116,80) rotate(-38)">
+    <rect x="-5" y="-22" width="10" height="28" rx="4" fill="url(#bl)"/>
+    <path d="M-5,-22 A8,8 0 0,1 5,-22" fill="none" stroke="url(#bl)" stroke-width="8.5" stroke-linecap="round"/>
+    <circle cx="0" cy="7" r="6.5" fill="url(#bl)"/>
+  </g>
+
+  <!-- TEXT: Gear + log -->
+  <text x="96" y="153" text-anchor="middle"
+        font-family="'Arial Black',Arial,sans-serif"
+        font-weight="900" font-style="italic" font-size="20"
+        fill="white">Gear<tspan fill="#2563eb">log</tspan></text>
+  <rect x="60" y="158" width="72" height="3" rx="1.5" fill="#2563eb"/>
+</svg>

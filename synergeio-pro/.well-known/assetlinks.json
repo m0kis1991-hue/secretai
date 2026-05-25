@@ -1,0 +1,10 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "app.gearlog.pro",
+    "sha256_cert_fingerprints": [
+      "23:55:A8:FE:0C:A1:83:63:77:38:3D:C4:BE:B2:9E:E4:C3:71:2B:D8:17:06:BE:BB:2C:B3:5E:AB:97:E2:37:4A"
+    ]
+  }
+}]

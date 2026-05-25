@@ -1,0 +1,158 @@
+﻿<!DOCTYPE html>
+<html lang="el">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#f97316" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="GearLog" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" type="image/svg+xml" href="icon-192.svg" />
+  <link rel="apple-touch-icon" href="icon-192.svg" />
+  <title>GearLog · Διαχείριση Service</title>
+
+  <!-- Tailwind -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: { extend: { fontFamily: { sans: ['system-ui','-apple-system','Segoe UI','Roboto','sans-serif'] } } },
+    };
+  </script>
+
+  <!-- Lucide icons (defer: non-blocking) -->
+  <script defer src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+
+  <!-- jsPDF + html2canvas (defer: non-blocking) -->
+  <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+
+  <!-- Chart.js (defer: non-blocking) -->
+  <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+
+  <style>
+    html, body { height: 100%; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    /* iOS safe areas */
+    .pb-safe { padding-bottom: calc(env(safe-area-inset-bottom) + 0.5rem); }
+    /* print */
+    @media print {
+      .no-print, header, footer, nav { display: none !important; }
+      body { background: white !important; color: black !important; }
+    }
+    /* hide scrollbar in webkit for clean look */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-thumb { background: rgba(100, 116, 139, 0.4); border-radius: 4px; }
+    /* radio peer checked icon color fix */
+    input[type=radio]:checked + div [data-lucide] { color: white; }
+    /* loader spin */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .animate-spin > i { animation: spin 1s linear infinite; display: inline-block; }
+    /* Tab underline active style */
+    .tab-active {
+      border-bottom: 2px solid #f97316;
+      color: #f97316;
+    }
+    .tab-inactive {
+      border-bottom: 2px solid transparent;
+      color: #64748b;
+    }
+  </style>
+</head>
+<body class="bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 min-h-screen">
+
+  <!-- Main content -->
+  <main id="view" class="min-h-screen pb-20 sm:pb-0">
+    <div id="app-loading" style="padding:2rem;color:#94a3b8;font-size:0.9rem">Φόρτωση εφαρμογής…</div>
+  </main>
+
+  <!-- Bottom navigation (mobile) -->
+  <nav class="fixed bottom-0 inset-x-0 z-30 bg-white/95 dark:bg-slate-900/95 backdrop-blur border-t border-slate-200 dark:border-slate-800 sm:hidden no-print pb-safe">
+    <div class="grid grid-cols-5 gap-1 px-1 py-2 max-w-md mx-auto">
+      <a href="#/dashboard" data-nav="/dashboard" class="flex flex-col items-center gap-0.5 py-1 text-xs">
+        <i data-lucide="home" class="w-5 h-5"></i><span data-i18n="nav_dashboard">Αρχική</span>
+      </a>
+      <a href="#/customers" data-nav="/customers" class="flex flex-col items-center gap-0.5 py-1 text-xs">
+        <i data-lucide="users" class="w-5 h-5"></i><span data-i18n="nav_customers">Πελάτες</span>
+      </a>
+      <a href="#/job-orders" data-nav="/job-orders" class="flex flex-col items-center gap-0.5 py-1 text-xs">
+        <i data-lucide="clipboard-check" class="w-5 h-5"></i><span data-i18n="nav_job_orders">Εντολές</span>
+      </a>
+      <a href="#/schedule" data-nav="/schedule" class="flex flex-col items-center gap-0.5 py-1 text-xs">
+        <i data-lucide="calendar-clock" class="w-5 h-5"></i><span data-i18n="nav_schedule">Πρόγραμμα</span>
+      </a>
+      <a href="#/settings" data-nav="/settings" class="flex flex-col items-center gap-0.5 py-1 text-xs">
+        <i data-lucide="settings" class="w-5 h-5"></i><span data-i18n="nav_settings">Ρυθμίσεις</span>
+      </a>
+    </div>
+  </nav>
+
+  <!-- Sidebar (desktop) -->
+  <aside class="hidden sm:flex fixed left-0 top-0 bottom-0 w-56 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex-col z-20 no-print">
+    <div class="p-4 border-b border-slate-200 dark:border-slate-800">
+      <div class="flex items-center gap-2">
+        <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+          <i data-lucide="gauge" class="w-5 h-5 text-white"></i>
+        </div>
+        <div>
+          <div class="font-bold text-sm">GearLog</div>
+          <div class="text-xs text-slate-500" data-i18n="app_tagline">Διαχείριση Service</div>
+        </div>
+      </div>
+    </div>
+    <nav class="flex-1 p-2 space-y-0.5 overflow-y-auto">
+      <a href="#/dashboard" data-nav="/dashboard" class="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-sm">
+        <i data-lucide="home" class="w-4 h-4"></i><span data-i18n="nav_dashboard">Αρχική</span>
+      </a>
+      <a href="#/customers" data-nav="/customers" class="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-sm">
+        <i data-lucide="users" class="w-4 h-4"></i><span data-i18n="nav_customers">Πελάτες</span>
+      </a>
+      <a href="#/vehicles" data-nav="/vehicles" class="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-sm">
+        <i data-lucide="car" class="w-4 h-4"></i><span data-i18n="nav_vehicles">Οχήματα</span>
+      </a>
+      <a href="#/services" data-nav="/services" class="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-sm">
+        <i data-lucide="wrench" class="w-4 h-4"></i><span data-i18n="nav_services">Service</span>
+      </a>
+      <a href="#/reminders" data-nav="/reminders" class="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-sm">
+        <i data-lucide="bell" class="w-4 h-4"></i><span data-i18n="nav_reminders">Υπενθυμίσεις</span>
+      </a>
+      <div class="pt-2 pb-1 px-3 text-xs font-semibold text-slate-400 uppercase tracking-wide">Εργασίες</div>
+      <a href="#/job-orders" data-nav="/job-orders" class="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-sm">
+        <i data-lucide="clipboard-check" class="w-4 h-4"></i><span data-i18n="nav_job_orders">Εντολές</span>
+      </a>
+      <a href="#/schedule" data-nav="/schedule" class="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-sm">
+        <i data-lucide="calendar-clock" class="w-4 h-4"></i><span data-i18n="nav_schedule">Πρόγραμμα</span>
+      </a>
+      <div class="pt-2 pb-1 px-3 text-xs font-semibold text-slate-400 uppercase tracking-wide">Εργαλεία</div>
+      <a href="#/scan" data-nav="/scan" class="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-sm">
+        <i data-lucide="scan-line" class="w-4 h-4"></i><span data-i18n="nav_scan">AI Scan</span>
+      </a>
+      <a href="#/settings" data-nav="/settings" class="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-sm">
+        <i data-lucide="settings" class="w-4 h-4"></i><span data-i18n="nav_settings">Ρυθμίσεις</span>
+      </a>
+    </nav>
+    <button id="install-btn" class="hidden m-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">
+      <i data-lucide="download" class="w-4 h-4"></i> <span data-i18n="install_app">Εγκατάσταση</span>
+    </button>
+  </aside>
+
+  <!-- Adjust main margin on desktop -->
+  <style>
+    @media (min-width: 640px) {
+      main#view { margin-left: 14rem; }
+    }
+  </style>
+
+  <!-- Load app scripts -->
+  <script src="i18n.js"></script>
+  <script src="db.js"></script>
+  <script src="utils.js"></script>
+  <script src="app.js"></script>
+
+  <script>
+    // Initial Lucide render before app.js fires
+    if (window.lucide && lucide.createIcons) lucide.createIcons();
+  </script>
+</body>
+</html>
