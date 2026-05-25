@@ -2089,7 +2089,7 @@
       const file = e.target.files[0];
       if (!file) return;
       const dataUrl = await U.readFileAsDataURL(file);
-      const compressed = await U.compressImage(dataUrl, 2800, 0.95);
+      const compressed = await U.compressImage(dataUrl, 1800, 0.88);
       photos[idx] = compressed;
       $(`#img${idx}`).src = compressed;
       $(`#prev${idx}`).classList.remove('hidden');
