@@ -3,10 +3,6 @@
   "outputDirectory": ".",
   "installCommand": null,
   "framework": null,
-  "functions": {
-    "api/ai-scan.js": { "maxDuration": 60, "memory": 1024 },
-    "api/plate-ocr.js": { "maxDuration": 30 }
-  },
   "headers": [
     {
       "source": "/sw.js",
