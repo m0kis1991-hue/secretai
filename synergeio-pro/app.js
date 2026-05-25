@@ -143,6 +143,47 @@
     </button>`;
   }
 
+  // Shared Greek digit-word → digit map (used by phone + number transforms)
+  const GREEK_DIGITS = {
+    'μηδέν':0,'μηδεν':0,'μηδέν':0,
+    'ένα':1,'ενα':1,'μία':1,'μια':1,'μια':1,
+    'δύο':2,'δυο':2,
+    'τρία':3,'τρια':3,'τρεις':3,'τρείς':3,
+    'τέσσερα':4,'τεσσερα':4,'τέσσερις':4,'τεσσερις':4,'τέσσερα':4,
+    'πέντε':5,'πεντε':5,
+    'έξι':6,'εξι':6,'έξη':6,'εξη':6,'εξ':6,
+    'επτά':7,'εφτά':7,'εφτα':7,'επτα':7,'εφτά':7,
+    'οκτώ':8,'οχτώ':8,'οκτω':8,'οχτω':8,
+    'εννέα':9,'εννιά':9,'εννεα':9,'εννια':9,'εννιά':9,
+  };
+
+  function applyGreekDigits(s) {
+    let r = s;
+    for (const [w, d] of Object.entries(GREEK_DIGITS)) {
+      r = r.replace(new RegExp(w, 'gi'), String(d));
+    }
+    return r;
+  }
+
+  const VOICE_TRANSFORMS = {
+    plate: (s) => s.toUpperCase().replace(/\s+/g, '').replace(/[^A-ZΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩ0-9]/gi, ''),
+
+    phone: (s) => {
+      const hasPlus = /[+]|συν\b|plus\b/i.test(s);
+      let r = applyGreekDigits(s).replace(/[^0-9]/g, '');
+      return (hasPlus ? '+' : '') + r;
+    },
+
+    number: (s) => applyGreekDigits(s).replace(/[^0-9]/g, ''),
+
+    email: (s) => s.toLowerCase().trim()
+      .replace(/\s*(παπάκι|at\b|ατ\b|@)\s*/g, '@')
+      .replace(/\s*(τελεία|dot\b|point\b|\.)\s*/g, '.')
+      .replace(/\s*(παύλα|dash\b|-)\s*/g, '-')
+      .replace(/\s*(κάτω\s*παύλα|underscore\b|_)\s*/g, '_')
+      .replace(/\s+/g, ''),
+  };
+
   function initVoiceButtons() {
     if (!U.hasSpeech()) return;
     $$('.voice-btn[data-vfor]').forEach((btn) => {
@@ -150,9 +191,7 @@
       btn._vb = true;
 
       const tr = btn.dataset.vtr;
-      const transform = tr === 'plate'
-        ? (s) => s.toUpperCase().replace(/\s+/g, '').replace(/[^A-ZΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩ0-9]/gi, '')
-        : undefined;
+      const transform = VOICE_TRANSFORMS[tr] || undefined;
 
       function startRec(e) {
         e.preventDefault();
@@ -752,14 +791,14 @@
             <div class="flex gap-2">
               <input type="tel" name="phone" id="cf-phone" value="${U.escape(c.phone || '')}" placeholder="+30 69..." data-vi="1"
                 class="flex-1 min-w-0 px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              ${micBtn('cf-phone')}
+              ${micBtn('cf-phone', { transform: 'phone' })}
             </div>
           </div>
-          ${formField('email', t('customer_email'), c.email, { type: 'email', voice: true })}
+          ${formField('email', t('customer_email'), c.email, { type: 'email', voice: true, transform: 'email' })}
           ${formField('address', t('customer_address'), c.address, { voice: true })}
           <div class="grid grid-cols-2 gap-3">
             ${formField('company', t('customer_company'), c.company, { voice: true })}
-            ${formField('taxId', t('customer_tax_id'), c.taxId, { voice: true })}
+            ${formField('taxId', t('customer_tax_id'), c.taxId, { voice: true, transform: 'number' })}
           </div>
           ${formTextArea('notes', t('notes'), c.notes)}
           <!-- Contact methods (multi-select) -->
@@ -3418,7 +3457,9 @@
     opts = opts || {};
     const fieldId = opts.id || `ff-${name}`;
     const isText = !opts.type || opts.type === 'text' || opts.type === 'tel' || opts.type === 'email';
-    const mic = opts.voice && isText ? micBtn(fieldId) : '';
+    // Auto-detect transform by field type if not explicitly set
+    const vtr = opts.transform || (opts.type === 'tel' ? 'phone' : opts.type === 'email' ? 'email' : '');
+    const mic = opts.voice && isText ? micBtn(fieldId, { transform: vtr }) : '';
     return `
       <div>
         <label class="block text-sm font-medium mb-1">${U.escape(label)}${opts.required?' <span class="text-red-500">*</span>':''}</label>
