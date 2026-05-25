@@ -103,32 +103,40 @@ module.exports = async function handler(req, res) {
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
         max_tokens: 1024,
-        messages: [
-          {
-            role: 'user',
-            content: [
-              ...imageBlocks,
-              { type: 'text', text: prompt },
-            ],
-          },
-          // Prefill forces clean JSON output — no markdown, no preamble
-          {
-            role: 'assistant',
-            content: '{',
-          },
-        ],
+        messages: [{
+          role: 'user',
+          content: [
+            ...imageBlocks,
+            { type: 'text', text: prompt },
+          ],
+        }],
       }),
     });
 
     const data = await response.json();
-    if (data.error) return res.status(500).json({ error: data.error.message || 'Anthropic error' });
+    if (data.error) {
+      console.error('Anthropic API error:', JSON.stringify(data.error));
+      return res.status(500).json({ error: data.error.message || 'Anthropic error' });
+    }
 
-    // Prepend the prefilled '{' back
-    const txt = '{' + (data?.content?.[0]?.text || '');
-    const m = txt.match(/\{[\s\S]*?\}/);
-    if (!m) return res.status(500).json({ error: 'Could not parse AI response' });
+    const raw = data?.content?.[0]?.text || '';
+    console.log('AI raw response:', raw.slice(0, 300));
 
-    const result = JSON.parse(m[0]);
+    // Extract JSON — find outermost { ... }
+    const start = raw.indexOf('{');
+    const end = raw.lastIndexOf('}');
+    if (start === -1 || end === -1 || end <= start) {
+      return res.status(500).json({ error: 'Δεν βρέθηκε JSON στην απάντηση AI' });
+    }
+    const jsonStr = raw.slice(start, end + 1);
+
+    let result;
+    try {
+      result = JSON.parse(jsonStr);
+    } catch (parseErr) {
+      console.error('JSON parse error:', parseErr.message, '\nRaw:', jsonStr.slice(0, 200));
+      return res.status(500).json({ error: 'Σφάλμα ανάλυσης απάντησης AI' });
+    }
 
     // --- Normalize & validate ---
 
