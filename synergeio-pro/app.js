@@ -1,4 +1,4 @@
-// =========================================================
+﻿// =========================================================
 //  ΣυνεργείοPro - Main app: router + views
 // =========================================================
 (function () {
@@ -76,7 +76,7 @@
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-0.5">
           ${tasks.map((key) => `
             <label class="flex items-center gap-2 p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/30 cursor-pointer">
-              <input type="checkbox" data-task="${key}" ${selectedTasks.has(key) ? 'checked' : ''} class="w-4 h-4 rounded accent-orange-500 flex-shrink-0" />
+              <input type="checkbox" data-task="${key}" ${selectedTasks.has(key) ? 'checked' : ''} class="w-4 h-4 rounded accent-blue-600 flex-shrink-0" />
               <span class="text-sm">${U.escape(t('task_' + key))}</span>
             </label>
           `).join('')}
@@ -128,6 +128,7 @@
     return `<i data-lucide="${name}" class="${cls || 'w-5 h-5'}"></i>`;
   }
 
+
   function refreshIcons() {
     if (window.lucide && window.lucide.createIcons) window.lucide.createIcons();
     initVoiceButtons();
@@ -147,28 +148,44 @@
     $$('.voice-btn[data-vfor]').forEach((btn) => {
       if (btn._vb) return;
       btn._vb = true;
-      btn.addEventListener('click', (e) => {
+
+      const tr = btn.dataset.vtr;
+      const transform = tr === 'plate'
+        ? (s) => s.toUpperCase().replace(/\s+/g, '').replace(/[^A-ZΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩ0-9]/gi, '')
+        : undefined;
+
+      function startRec(e) {
         e.preventDefault();
         if (btn._rec) return;
         const target = document.getElementById(btn.dataset.vfor);
         if (!target) return;
         btn._rec = true;
         btn.classList.add('!bg-red-500', '!text-white');
-        btn.innerHTML = icon('mic-off', 'w-4 h-4 animate-pulse');
+        btn.innerHTML = icon('mic-off', 'w-5 h-5 animate-pulse');
         refreshIcons();
-        const tr = btn.dataset.vtr;
-        U.triggerVoice(target, {
-          transform: tr === 'plate'
-            ? (s) => s.toUpperCase().replace(/\s+/g, '').replace(/[^A-ZΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩ0-9]/gi, '')
-            : undefined,
+        btn._recognition = U.triggerVoice(target, {
+          transform,
           onEnd: () => {
             btn._rec = false;
+            btn._recognition = null;
             btn.classList.remove('!bg-red-500', '!text-white');
-            btn.innerHTML = icon('mic', 'w-4 h-4');
+            btn.innerHTML = icon('mic', 'w-5 h-5');
             refreshIcons();
           },
         });
-      });
+      }
+
+      function stopRec(e) {
+        if (btn._recognition) {
+          try { btn._recognition.stop(); } catch (_) {}
+        }
+      }
+
+      btn.addEventListener('mousedown', startRec);
+      btn.addEventListener('touchstart', startRec, { passive: false });
+      btn.addEventListener('mouseup', stopRec);
+      btn.addEventListener('touchend', stopRec);
+      btn.addEventListener('mouseleave', stopRec);
     });
   }
 
@@ -191,7 +208,6 @@
     '/services/:id/edit': (id) => renderServiceForm(id),
     '/reminders': renderReminders,
     '/scan': renderAIScan,
-    '/parts': renderPartsSearch,
     '/settings': renderSettings,
     '/job-orders': renderJobOrders,
     '/job-orders/new': () => renderJobOrderForm(),
@@ -233,8 +249,8 @@
     const hash = location.hash.replace(/^#/, '') || '/dashboard';
     $$('[data-nav]').forEach((el) => {
       const isActive = hash.startsWith(el.dataset.nav);
-      el.classList.toggle('text-orange-600', isActive);
-      el.classList.toggle('dark:text-orange-400', isActive);
+      el.classList.toggle('text-blue-700', isActive);
+      el.classList.toggle('dark:text-blue-500', isActive);
       el.classList.toggle('text-slate-500', !isActive);
       el.classList.toggle('dark:text-slate-400', !isActive);
     });
@@ -265,26 +281,25 @@
   //  DASHBOARD
   // =========================================================
   async function renderDashboard() {
-    $('#view').innerHTML = `
-      <div class="min-h-screen flex flex-col">
-        <!-- Top bar -->
-        <div class="flex items-center justify-between px-4 pt-4 pb-2 sm:px-8 sm:pt-6">
-          <div>
-            <div class="text-xs text-slate-400">${t('dashboard_welcome')}</div>
-            <div class="text-lg font-bold leading-tight">${U.escape(state.settings.workshopName || t('app_name'))}</div>
-          </div>
-          <button onclick="go('/settings')" class="p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400">
-            ${icon('settings','w-5 h-5')}
-          </button>
-        </div>
+    // --- stats ---
+    const totalVehicles  = state.vehicles.length;
+    const totalCustomers = state.customers.length;
+    const pendingJOs     = (state.jobOrders || []).filter((j) => j.status !== 'completed').length;
+    const overdueVehicles = state.vehicles
+      .map((v) => ({ v, r: U.reminderStatus(v, servicesForVehicle(v.id), state.settings) }))
+      .filter(({ r }) => r.status === 'overdue' || r.status === 'upcoming');
 
-        <!-- Hero plate search — vertically centered -->
-        <div class="flex-1 flex flex-col items-center justify-center px-4 pb-24 sm:pb-12">
-          <div class="w-full max-w-sm">
+    $('#view').innerHTML = `
+      <div class="min-h-screen flex flex-col items-center justify-center px-4 py-10 pb-28 sm:pb-12">
+        <div class="w-full max-w-md space-y-8">
+
+        <!-- Plate search -->
+        <div>
+          <div class="w-full max-w-md">
 
             <!-- Icon + title -->
             <div class="text-center mb-7">
-              <div class="w-20 h-20 bg-orange-500 rounded-3xl flex items-center justify-center mx-auto mb-4 shadow-xl shadow-orange-500/30">
+              <div class="w-20 h-20 bg-blue-600 rounded-3xl flex items-center justify-center mx-auto mb-4 shadow-xl shadow-blue-600/30">
                 ${icon('search','w-10 h-10 text-white')}
               </div>
               <h1 class="text-2xl font-bold">${t('plate_search_title')}</h1>
@@ -296,21 +311,15 @@
               <!-- Plate input -->
               <input id="dash-plate" type="text" inputmode="text" autocomplete="off" spellcheck="false"
                 placeholder="${t('plate_search_placeholder')}"
-                class="w-full px-4 py-4 rounded-2xl text-3xl font-bold tracking-widest uppercase text-center bg-white dark:bg-slate-700 text-slate-900 dark:text-white placeholder-slate-300 dark:placeholder-slate-500 border-0 focus:outline-none focus:ring-2 focus:ring-orange-500 mb-4"
+                class="w-full px-4 py-4 rounded-2xl text-3xl font-bold tracking-widest uppercase text-center bg-white dark:bg-slate-700 text-slate-900 dark:text-white placeholder:text-base placeholder:font-normal placeholder:tracking-normal placeholder:normal-case placeholder-slate-300 dark:placeholder-slate-500 border-0 focus:outline-none focus:ring-2 focus:ring-blue-600 mb-4"
                 maxlength="12" />
 
               <!-- Action buttons row -->
-              <div class="grid grid-cols-3 gap-2">
-                <!-- Mic -->
-                ${micBtn('dash-plate', { transform: 'plate', cls: 'w-full h-12 rounded-2xl bg-slate-700 text-slate-300 hover:bg-red-500 hover:text-white' })}
-
-                <!-- Camera → plate OCR -->
+              <div class="grid grid-cols-2 gap-2">
                 <button id="dash-plate-cam" class="h-12 flex items-center justify-center gap-1.5 rounded-2xl bg-purple-600 hover:bg-purple-700 text-white font-medium text-sm transition-colors" title="${t('plate_photo_btn')}">
                   ${icon('camera','w-5 h-5')} <span>${t('plate_photo_btn')}</span>
                 </button>
-
-                <!-- Search -->
-                <button id="dash-plate-btn" class="h-12 flex items-center justify-center gap-1.5 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-medium text-sm transition-colors">
+                <button id="dash-plate-btn" class="h-12 flex items-center justify-center gap-1.5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm transition-colors">
                   ${icon('arrow-right','w-5 h-5')} <span>${t('plate_search_btn')}</span>
                 </button>
               </div>
@@ -324,54 +333,162 @@
 
           </div>
         </div>
+
+        <!-- Stats panel -->
+        <div class="space-y-4">
+
+          <!-- 4 stat cards -->
+          <div class="grid grid-cols-2 gap-3">
+            <a href="#/vehicles" class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 flex items-center gap-3 shadow-sm">
+              <div class="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-500 flex items-center justify-center flex-shrink-0">
+                ${icon('car','w-5 h-5')}
+              </div>
+              <div>
+                <div class="text-2xl font-bold">${totalVehicles}</div>
+                <div class="text-xs text-slate-500 dark:text-slate-400">Οχήματα</div>
+              </div>
+            </a>
+            <a href="#/customers" class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 flex items-center gap-3 shadow-sm">
+              <div class="w-10 h-10 rounded-xl bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 flex items-center justify-center flex-shrink-0">
+                ${icon('users','w-5 h-5')}
+              </div>
+              <div>
+                <div class="text-2xl font-bold">${totalCustomers}</div>
+                <div class="text-xs text-slate-500 dark:text-slate-400">Πελάτες</div>
+              </div>
+            </a>
+            <a href="#/job-orders" class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 flex items-center gap-3 shadow-sm">
+              <div class="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 flex items-center justify-center flex-shrink-0">
+                ${icon('clipboard-check','w-5 h-5')}
+              </div>
+              <div>
+                <div class="text-2xl font-bold">${pendingJOs}</div>
+                <div class="text-xs text-slate-500 dark:text-slate-400">Εκκρεμείς εντολές</div>
+              </div>
+            </a>
+            <a href="#/reminders" class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 flex items-center gap-3 shadow-sm">
+              <div class="w-10 h-10 rounded-xl ${overdueVehicles.length ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400' : 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400'} flex items-center justify-center flex-shrink-0">
+                ${icon('bell','w-5 h-5')}
+              </div>
+              <div>
+                <div class="text-2xl font-bold">${overdueVehicles.length}</div>
+                <div class="text-xs text-slate-500 dark:text-slate-400">Υπενθυμίσεις</div>
+              </div>
+            </a>
+          </div>
+
+          <!-- Vehicles needing service -->
+          ${overdueVehicles.length ? `
+          <div>
+            <h2 class="text-sm font-semibold text-slate-600 dark:text-slate-400 mb-2 flex items-center gap-1.5">
+              ${icon('bell','w-4 h-4')} Χρειάζονται επίσκεψη
+            </h2>
+            <div class="space-y-2">
+              ${overdueVehicles.map(({ v, r }) => {
+                const c = customerById(v.customerId);
+                const isOverdue = r.status === 'overdue';
+                return `
+                <a href="#/vehicles/${v.id}" class="flex items-center gap-3 bg-white dark:bg-slate-800 rounded-2xl border ${isOverdue ? 'border-red-200 dark:border-red-900/40' : 'border-amber-200 dark:border-amber-900/40'} p-3 shadow-sm">
+                  <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${isOverdue ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400' : 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400'}">
+                    ${icon(vehicleIcon(v.type || 'car'),'w-5 h-5')}
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <div class="font-semibold text-sm truncate">${U.escape((v.plate || '').toUpperCase())} · ${U.escape(v.brand || '')} ${U.escape(v.model || '')}</div>
+                    ${c ? `<div class="text-xs text-slate-500 dark:text-slate-400 truncate">${U.escape(c.name)}</div>` : ''}
+                  </div>
+                  <div class="text-xs font-medium flex-shrink-0 ${isOverdue ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'}">
+                    ${isOverdue ? `${-r.days}μ. εκπρόθεσμο` : `${r.days}μ. απομένουν`}
+                  </div>
+                </a>`;
+              }).join('')}
+            </div>
+          </div>
+          ` : ''}
+
+        </div>
+
+        </div>
       </div>
     `;
     refreshIcons();
 
     // ---------- plate lookup ----------
+    function normPlate(p) {
+      // Remove spaces/dashes first, then uppercase
+      let s = (p || '').toUpperCase().replace(/[\s\-_.]/g, '');
+
+      // Convert spelled-out Greek letter names → single letter (longest first to avoid partial matches)
+      // Voice recognition says "ΜΙ ΝΙ ΡΟ" → writes "ΜΙΝΙΡΟ" → we decode back to "ΜΝΡ"
+      const NAMES = [
+        ['ΟΜΙΚΡΟΝ','Ο'],
+        ['ΕΨΙΛΟΝ','Ε'],['ΛΑΜΒΔΑ','Λ'],['ΥΨΙΛΟΝ','Υ'],['ΟΜΙΚΡΟ','Ο'],
+        ['ΓΑΜΜΑ','Γ'],['ΔΕΛΤΑ','Δ'],['ΚΑΠΠΑ','Κ'],['ΛΑΜΔΑ','Λ'],['ΣΙΓΜΑ','Σ'],['ΩΜΕΓΑ','Ω'],['ΕΨΙΛΟ','Ε'],['ΥΨΙΛΟ','Υ'],
+        ['ΑΛΦΑ','Α'],['ΒΗΤΑ','Β'],['ΒΙΤΑ','Β'],['ΓΑΜΑ','Γ'],['ΖΗΤΑ','Ζ'],['ΖΙΤΑ','Ζ'],['ΘΗΤΑ','Θ'],['ΘΙΤΑ','Θ'],['ΙΩΤΑ','Ι'],
+        ['ΗΤΑ','Η'],['ΤΑΥ','Τ'],['ΤΑΦ','Τ'],
+        ['ΜΙ','Μ'],['ΜΥ','Μ'],['ΝΙ','Ν'],['ΝΥ','Ν'],['ΡΟ','Ρ'],['ΡΩ','Ρ'],
+        ['ΠΙ','Π'],['ΦΙ','Φ'],['ΧΙ','Χ'],['ΨΙ','Ψ'],['ΞΙ','Ξ'],
+      ];
+      for (const [name, letter] of NAMES) {
+        s = s.split(name).join(letter);
+      }
+
+      // Keep only letters and digits
+      s = s.replace(/[^A-ZΑ-ΩΆΈΉΊΌΎΏ0-9]/g, '');
+
+      // Greek plate format: max 3 letters + max 4 digits
+      const letters = s.replace(/[0-9]/g, '').slice(0, 3);
+      const digits  = s.replace(/[^0-9]/g, '').slice(0, 4);
+      return letters + digits;
+    }
     function plateLookup() {
-      const raw = ($('#dash-plate')?.value || '').trim().toUpperCase().replace(/[\s\-]/g, '');
+      const raw = normPlate($('#dash-plate')?.value || '');
       if (!raw) return;
       const result = $('#dash-plate-result');
-      const v = state.vehicles.find((x) => (x.plate || '').toUpperCase().replace(/[\s\-]/g, '') === raw);
+      const v = state.vehicles.find((x) => normPlate(x.plate) === raw);
       if (v) {
         const c = customerById(v.customerId);
         const lastSvc = servicesForVehicle(v.id).sort((a, b) => new Date(b.date) - new Date(a.date))[0];
         const activeJOs = (state.jobOrders || []).filter((j) => j.vehicleId === v.id && j.status !== 'completed').length;
         result.innerHTML = `
-          <div class="bg-white/10 rounded-2xl p-3 flex items-center gap-3">
-            <div class="w-12 h-12 rounded-xl bg-orange-500/20 text-orange-400 flex items-center justify-center flex-shrink-0">
+          <div class="bg-white/10 rounded-2xl p-3 flex items-center gap-3 mb-3">
+            <div class="w-12 h-12 rounded-xl bg-blue-600/20 text-blue-500 flex items-center justify-center flex-shrink-0">
               ${icon(vehicleIcon(v.type || 'car'), 'w-6 h-6')}
             </div>
             <div class="flex-1 min-w-0">
               <div class="font-bold text-sm text-white">${U.escape(v.brand || '')} ${U.escape(v.model || '')} <span class="text-slate-400 font-normal text-xs">${v.year || ''}</span></div>
               ${c ? `<div class="text-xs text-slate-300 truncate">${U.escape(c.name)}</div>` : ''}
+              ${v.mileage ? `<div class="text-xs text-slate-400">${Number(v.mileage).toLocaleString()} km</div>` : ''}
               ${lastSvc ? `<div class="text-xs text-slate-400">τελ. service: ${U.fmtDate(lastSvc.date)}</div>` : ''}
-              ${activeJOs ? `<div class="text-xs text-amber-400 font-medium">${activeJOs} ${t('plate_active_orders')}</div>` : ''}
+              ${activeJOs ? `<div class="text-xs text-amber-400 font-medium">${activeJOs} εκκρεμείς εντολές</div>` : ''}
             </div>
           </div>
-          <div class="flex flex-col gap-2 mt-2">
-            <button onclick="go('/job-orders/new?vehicle=${v.id}')" class="w-full bg-orange-500 hover:bg-orange-600 text-white font-semibold py-3 rounded-2xl flex items-center justify-center gap-2 transition-colors">
-              ${icon('plus','w-4 h-4')} ${t('plate_new_order')}
+          <button onclick="go('/services/new?vehicle=${v.id}')" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-2 transition-colors text-lg mb-2">
+            ${icon('wrench','w-5 h-5')} Νέο Service
+          </button>
+          <div class="grid grid-cols-2 gap-2">
+            <button onclick="go('/job-orders/new?vehicle=${v.id}')" class="bg-white/10 hover:bg-white/20 text-white font-medium py-2.5 rounded-2xl flex items-center justify-center gap-1.5 transition-colors text-sm">
+              ${icon('clipboard-check','w-4 h-4')} Εντολή
             </button>
-            <button onclick="go('/vehicles/${v.id}')" class="w-full bg-white/10 hover:bg-white/20 text-white font-medium py-2.5 rounded-2xl flex items-center justify-center gap-2 transition-colors text-sm">
-              ${icon('history','w-4 h-4')} ${t('plate_history')}
+            <button onclick="go('/vehicles/${v.id}')" class="bg-white/10 hover:bg-white/20 text-white font-medium py-2.5 rounded-2xl flex items-center justify-center gap-1.5 transition-colors text-sm">
+              ${icon('history','w-4 h-4')} Ιστορικό
             </button>
-          </div>`;
+          </div>
+        `;
       } else {
         result.innerHTML = `
-          <div class="text-center py-1">
-            <p class="text-slate-400 text-sm mb-1">${t('plate_not_found')}</p>
-            <p class="text-slate-500 text-xs mb-3">${t('plate_not_found_add')}</p>
-            <div class="flex flex-col gap-2">
-              <button onclick="go('/scan')" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-medium py-3 rounded-2xl flex items-center justify-center gap-2 transition-colors text-sm">
-                ${icon('scan-line','w-4 h-4')} ${t('plate_scan_hint')}
-              </button>
-              <button onclick="go('/vehicles/new')" class="w-full bg-white/10 hover:bg-white/20 text-white font-medium py-2.5 rounded-2xl flex items-center justify-center gap-2 transition-colors text-sm">
-                ${icon('plus','w-4 h-4')} ${t('plate_new_vehicle')}
-              </button>
-            </div>
-          </div>`;
+          <div class="text-center py-2 mb-2">
+            <p class="text-slate-300 text-sm font-medium mb-0.5">Δεν βρέθηκε στο αρχείο</p>
+            <p class="text-slate-500 text-xs">Καταχώρησε το νέο όχημα</p>
+          </div>
+          <div class="flex flex-col gap-2">
+            <button onclick="go('/scan')" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold py-3.5 rounded-2xl flex items-center justify-center gap-2 transition-colors">
+              ${icon('scan-line','w-5 h-5')} Σκανάρισμα εγγράφου (AI)
+            </button>
+            <button onclick="go('/vehicles/new')" class="w-full bg-white/15 hover:bg-white/25 text-white font-medium py-3 rounded-2xl flex items-center justify-center gap-2 transition-colors text-sm">
+              ${icon('plus','w-4 h-4')} Χειροκίνητη καταχώρηση
+            </button>
+          </div>
+        `;
       }
       refreshIcons();
     }
@@ -426,38 +543,6 @@
     });
   }
 
-  function statCard(iconName, value, label, href, color) {
-    const colors = {
-      sky: 'from-orange-50 to-orange-100 dark:from-orange-900/30 dark:to-orange-900/10 text-orange-700 dark:text-orange-300',
-      indigo: 'from-indigo-50 to-indigo-100 dark:from-indigo-900/30 dark:to-indigo-900/10 text-indigo-700 dark:text-indigo-300',
-      emerald: 'from-emerald-50 to-emerald-100 dark:from-emerald-900/30 dark:to-emerald-900/10 text-emerald-700 dark:text-emerald-300',
-      amber: 'from-amber-50 to-amber-100 dark:from-amber-900/30 dark:to-amber-900/10 text-amber-700 dark:text-amber-300',
-      red: 'from-red-50 to-red-100 dark:from-red-900/30 dark:to-red-900/10 text-red-700 dark:text-red-300',
-    };
-    return `
-      <a href="${href}" class="block bg-gradient-to-br ${colors[color]} rounded-xl p-3 border border-white/50 dark:border-white/5">
-        <div class="flex items-center justify-between mb-2">${icon(iconName, 'w-5 h-5')}</div>
-        <div class="text-2xl font-bold">${value}</div>
-        <div class="text-xs opacity-80 truncate">${U.escape(label)}</div>
-      </a>
-    `;
-  }
-
-  function qaCard(iconName, label, href, color) {
-    const colors = {
-      sky: 'bg-orange-500 hover:bg-orange-600',
-      indigo: 'bg-indigo-500 hover:bg-indigo-600',
-      emerald: 'bg-emerald-500 hover:bg-emerald-600',
-      purple: 'bg-purple-500 hover:bg-purple-600',
-    };
-    return `
-      <a href="${href}" class="${colors[color]} text-white rounded-xl p-3 flex flex-col items-center justify-center gap-2 transition shadow-sm hover:shadow-md aspect-square">
-        ${icon(iconName, 'w-6 h-6')}
-        <span class="text-xs text-center font-medium leading-tight">${U.escape(label)}</span>
-      </a>
-    `;
-  }
-
   function reminderRow(r) {
     const c = customerById(r.v.customerId);
     const isOverdue = r.status === 'overdue';
@@ -480,18 +565,15 @@
   function serviceRow(s) {
     const v = vehicleById(s.vehicleId);
     const c = v ? customerById(v.customerId) : null;
-    const total = (s.parts || []).reduce((x, p) => x + (Number(p.qty) || 0) * (Number(p.price) || 0), 0)
-      + (Number(s.laborHours) || 0) * (Number(s.laborRate) || 0);
     return `
       <a href="#/services/${s.id}" class="flex items-center gap-3 p-3 hover:bg-slate-50 dark:hover:bg-slate-700/30">
         <div class="w-10 h-10 rounded-lg bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-300 flex items-center justify-center">
           ${icon('wrench', 'w-5 h-5')}
         </div>
         <div class="flex-1 min-w-0">
-          <div class="font-medium truncate">${U.escape(s.type || t('service'))} • ${U.escape(vehicleLabel(v))}</div>
+          <div class="font-medium truncate">${U.escape(vehicleLabel(v))} • ${s.mileage ? s.mileage + ' km' : ''}</div>
           <div class="text-xs text-slate-500 dark:text-slate-400 truncate">${U.fmtDate(s.date)} • ${U.escape(c?.name || '—')}</div>
         </div>
-        <div class="text-sm font-semibold">${U.fmtMoney(total, state.settings.currency)}</div>
       </a>
     `;
   }
@@ -504,11 +586,11 @@
     $('#view').innerHTML = `
       ${pageHeader(t('customers'), {
         back: false,
-        actions: `<a href="#/customers/new" class="bg-orange-500 hover:bg-orange-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1">${icon('plus','w-4 h-4')} ${t('add')}</a>`
+        actions: `<a href="#/customers/new" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1">${icon('plus','w-4 h-4')} ${t('add')}</a>`
       })}
       <div class="max-w-5xl mx-auto p-4 pb-24 sm:pb-4">
         <div class="relative mb-4">
-          <input id="search-input" type="search" placeholder="${t('search')}" class="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-500" />
+          <input id="search-input" type="search" placeholder="${t('search')}" class="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-600" />
           <div class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">${icon('search','w-4 h-4')}</div>
         </div>
         <div id="customers-list"></div>
@@ -540,7 +622,7 @@
     const count = vehiclesForCustomer(c.id).length;
     return `
       <a href="#/customers/${c.id}" class="flex items-center gap-3 p-3 hover:bg-slate-50 dark:hover:bg-slate-700/30">
-        <div class="w-10 h-10 rounded-full bg-orange-100 dark:bg-orange-900/40 text-orange-600 dark:text-orange-300 flex items-center justify-center font-semibold">
+        <div class="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 flex items-center justify-center font-semibold">
           ${U.escape((c.name || '?').slice(0, 1).toUpperCase())}
         </div>
         <div class="flex-1 min-w-0">
@@ -557,7 +639,7 @@
       <div class="text-center py-16">
         <div class="w-16 h-16 mx-auto bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-400 mb-3">${icon(iconName,'w-8 h-8')}</div>
         <div class="text-slate-500 dark:text-slate-400 mb-4">${U.escape(msg)}</div>
-        ${ctaHref ? `<a href="${ctaHref}" class="inline-flex items-center gap-1 bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-medium">${icon('plus','w-4 h-4')} ${U.escape(ctaLabel)}</a>` : ''}
+        ${ctaHref ? `<a href="${ctaHref}" class="inline-flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium">${icon('plus','w-4 h-4')} ${U.escape(ctaLabel)}</a>` : ''}
       </div>
     `;
   }
@@ -576,8 +658,8 @@
       })}
       <div class="max-w-5xl mx-auto p-4 pb-24 sm:pb-4 space-y-4">
         <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-2">
-          ${c.phone ? `<div class="flex items-center gap-2"><span class="text-slate-400">${icon('phone','w-4 h-4')}</span><a href="tel:${U.escape(c.phone)}" class="text-orange-600 dark:text-orange-400">${U.escape(c.phone)}</a></div>` : ''}
-          ${c.email ? `<div class="flex items-center gap-2"><span class="text-slate-400">${icon('mail','w-4 h-4')}</span><a href="mailto:${U.escape(c.email)}" class="text-orange-600 dark:text-orange-400">${U.escape(c.email)}</a></div>` : ''}
+          ${c.phone ? `<div class="flex items-center gap-2"><span class="text-slate-400">${icon('phone','w-4 h-4')}</span><a href="tel:${U.escape(c.phone)}" class="text-blue-700 dark:text-blue-500">${U.escape(c.phone)}</a></div>` : ''}
+          ${c.email ? `<div class="flex items-center gap-2"><span class="text-slate-400">${icon('mail','w-4 h-4')}</span><a href="mailto:${U.escape(c.email)}" class="text-blue-700 dark:text-blue-500">${U.escape(c.email)}</a></div>` : ''}
           ${c.address ? `<div class="flex items-center gap-2"><span class="text-slate-400">${icon('map-pin','w-4 h-4')}</span>${U.escape(c.address)}</div>` : ''}
           ${c.company ? `<div class="flex items-center gap-2"><span class="text-slate-400">${icon('briefcase','w-4 h-4')}</span>${U.escape(c.company)}</div>` : ''}
           ${c.taxId ? `<div class="flex items-center gap-2"><span class="text-slate-400">${icon('hash','w-4 h-4')}</span>ΑΦΜ: ${U.escape(c.taxId)}</div>` : ''}
@@ -587,7 +669,7 @@
             <div class="flex gap-2 pt-3 border-t border-slate-100 dark:border-slate-700">
               <a target="_blank" href="${U.whatsappLink(c.phone, '')}" class="flex-1 bg-green-500 hover:bg-green-600 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('message-circle','w-4 h-4')} WhatsApp</a>
               <a href="${U.viberLink(c.phone, '')}" class="flex-1 bg-purple-500 hover:bg-purple-600 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('phone','w-4 h-4')} Viber</a>
-              <a href="tel:${U.escape(c.phone)}" class="flex-1 bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('phone-call','w-4 h-4')} ${t('open')}</a>
+              <a href="tel:${U.escape(c.phone)}" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('phone-call','w-4 h-4')} ${t('open')}</a>
             </div>
           ` : ''}
         </div>
@@ -595,7 +677,7 @@
         <div>
           <div class="flex items-center justify-between mb-2">
             <h2 class="font-semibold">${t('customer_vehicles')}</h2>
-            <a href="#/vehicles/new?customer=${c.id}" class="text-sm text-orange-600 dark:text-orange-400 flex items-center gap-1">${icon('plus','w-4 h-4')} ${t('new_vehicle')}</a>
+            <a href="#/vehicles/new?customer=${c.id}" class="text-sm text-blue-700 dark:text-blue-500 flex items-center gap-1">${icon('plus','w-4 h-4')} ${t('new_vehicle')}</a>
           </div>
           ${vs.length ? `
             <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-700 overflow-hidden">
@@ -645,16 +727,16 @@
           <div>
             <label class="block text-sm font-medium mb-1">${t('customer_name')} <span class="text-red-500">*</span></label>
             <div class="flex gap-2">
-              <input type="text" name="name" id="cf-name" value="${U.escape(c.name || pendingName)}" required autocomplete="name"
-                class="flex-1 min-w-0 px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-500" />
+              <input type="text" name="name" id="cf-name" value="${U.escape(c.name || pendingName)}" required autocomplete="name" data-vi="1"
+                class="flex-1 min-w-0 px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500" />
               ${micBtn('cf-name')}
             </div>
           </div>
           <div>
             <label class="block text-sm font-medium mb-1">${t('customer_phone')}</label>
             <div class="flex gap-2">
-              <input type="tel" name="phone" id="cf-phone" value="${U.escape(c.phone || '')}" placeholder="+30 69..."
-                class="flex-1 min-w-0 px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-500" />
+              <input type="tel" name="phone" id="cf-phone" value="${U.escape(c.phone || '')}" placeholder="+30 69..." data-vi="1"
+                class="flex-1 min-w-0 px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500" />
               ${micBtn('cf-phone')}
             </div>
           </div>
@@ -665,13 +747,54 @@
             ${formField('taxId', t('customer_tax_id'), c.taxId)}
           </div>
           ${formTextArea('notes', t('notes'), c.notes)}
+          <!-- Contact methods (multi-select) -->
+          <div>
+            <label class="block text-sm font-medium mb-1">Τρόποι επικοινωνίας <span class="text-xs font-normal text-slate-400">(επίλεξε όσους έχει ο πελάτης)</span></label>
+            <div class="grid grid-cols-3 gap-2" id="cm-grid">
+              <button type="button" data-cm="sms" class="cm-btn flex flex-col items-center gap-1.5 py-3 rounded-xl border-2 border-slate-200 dark:border-slate-700 text-sm font-medium transition-all">
+                ${icon('message-circle','w-5 h-5')} SMS
+              </button>
+              <button type="button" data-cm="viber" class="cm-btn flex flex-col items-center gap-1.5 py-3 rounded-xl border-2 border-slate-200 dark:border-slate-700 text-sm font-medium transition-all">
+                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M11.4 0C5.2.4.6 5.2.6 11.4c0 2.2.6 4.3 1.8 6.1l-1.2 4.4 4.5-1.2c1.7 1 3.7 1.6 5.7 1.6 6.2 0 11-4.8 11.4-11C23 4.8 17.8-.4 11.4 0zm5.7 15.6c-.2.6-.9 1.1-1.6 1.2-.4.1-.9.1-1.4 0-2.7-.7-4.9-2.5-6.4-4.9-.8-1.3-1.3-2.7-1.4-4.2 0-.7.2-1.4.7-1.9.3-.3.6-.5.9-.5h.8c.3 0 .5.2.7.5l1 2.2c.1.3 0 .6-.2.8l-.6.7c-.1.2-.1.4 0 .6.5 1 1.3 1.9 2.3 2.5.2.1.4.1.6 0l.7-.7c.2-.2.5-.3.8-.2l2.2 1c.3.2.5.4.5.7v.8c0 .2-.1.3-.2.4h-.4z"/></svg>
+                Viber
+              </button>
+              <button type="button" data-cm="whatsapp" class="cm-btn flex flex-col items-center gap-1.5 py-3 rounded-xl border-2 border-slate-200 dark:border-slate-700 text-sm font-medium transition-all">
+                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.123.555 4.116 1.529 5.843L0 24l6.306-1.505A11.945 11.945 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 22c-1.886 0-3.655-.493-5.193-1.357l-.371-.22-3.747.895.93-3.65-.24-.385A9.96 9.96 0 012 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10z"/></svg>
+                WhatsApp
+              </button>
+            </div>
+            <input type="hidden" name="contactMethods" id="contact-methods-val" value="" />
+          </div>
           <div class="flex gap-2 pt-2">
-            <button type="submit" class="flex-1 bg-orange-500 hover:bg-orange-600 text-white font-medium py-2.5 rounded-lg">${t('save')}</button>
+            <button type="submit" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 rounded-lg">${t('save')}</button>
             <button type="button" onclick="history.back()" class="flex-1 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 font-medium py-2.5 rounded-lg">${t('cancel')}</button>
           </div>
         </form>
       </div>
     `;
+    // Contact methods — multi-select toggle buttons
+    const cmActive = { sms:'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700', viber:'border-violet-500 bg-violet-50 dark:bg-violet-900/20 text-violet-600', whatsapp:'border-green-500 bg-green-50 dark:bg-green-900/20 text-green-600' };
+    const cmInactive = 'border-slate-200 dark:border-slate-700 text-slate-500';
+    // Load existing: new field contactMethods[] or legacy preferredContact string
+    const existingMethods = c.contactMethods
+      ? (Array.isArray(c.contactMethods) ? c.contactMethods : JSON.parse(c.contactMethods || '[]'))
+      : (c.preferredContact ? [c.preferredContact] : []);
+    const activeMethods = new Set(existingMethods);
+
+    function refreshCmBtns() {
+      $$('.cm-btn').forEach((b) => {
+        const m = b.dataset.cm;
+        b.className = 'cm-btn flex flex-col items-center gap-1.5 py-3 rounded-xl border-2 text-sm font-medium transition-all ' +
+          (activeMethods.has(m) ? cmActive[m] : cmInactive);
+      });
+      $('#contact-methods-val').value = JSON.stringify([...activeMethods]);
+    }
+    refreshCmBtns();
+    $$('.cm-btn').forEach((b) => b.addEventListener('click', () => {
+      const m = b.dataset.cm;
+      activeMethods.has(m) ? activeMethods.delete(m) : activeMethods.add(m);
+      refreshCmBtns();
+    }));
     $('#customer-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const data = formData(e.target);
@@ -696,12 +819,12 @@
     $('#view').innerHTML = `
       ${pageHeader(t('vehicles'), {
         back: false,
-        actions: `<a href="#/vehicles/new" class="bg-orange-500 hover:bg-orange-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1">${icon('plus','w-4 h-4')} ${t('add')}</a>`
+        actions: `<a href="#/vehicles/new" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1">${icon('plus','w-4 h-4')} ${t('add')}</a>`
       })}
       <div class="max-w-5xl mx-auto p-4 pb-24 sm:pb-4">
         <div class="flex gap-2 mb-4">
           <div class="relative flex-1">
-            <input id="search-input" type="search" placeholder="${t('search')}" class="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-500" />
+            <input id="search-input" type="search" placeholder="${t('search')}" class="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-600" />
             <div class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">${icon('search','w-4 h-4')}</div>
           </div>
           <select id="type-filter" class="px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm">
@@ -769,19 +892,17 @@
 
   function serviceIconConfig(type) {
     const s = (type || '').toLowerCase();
-    if (s.includes('λάδ') || s.includes('oil') || s.includes('λιπ')) return { icon: 'droplets', bg: 'bg-orange-500' };
+    if (s.includes('λάδ') || s.includes('oil') || s.includes('λιπ')) return { icon: 'droplets', bg: 'bg-blue-600' };
     if (s.includes('φρέν') || s.includes('brake') || s.includes('τακάκ') || s.includes('δίσκ')) return { icon: 'disc', bg: 'bg-red-500' };
     if (s.includes('ελαστ') || s.includes('tire') || s.includes('ρόδ')) return { icon: 'circle-dot', bg: 'bg-slate-700' };
     if (s.includes('μπαταρ') || s.includes('battery')) return { icon: 'battery-charging', bg: 'bg-yellow-500' };
     if (s.includes('κτεο') || s.includes('inspect') || s.includes('έλεγχ')) return { icon: 'clipboard-check', bg: 'bg-blue-500' };
     if (s.includes('κλιματ') || s.includes('air') || s.includes('ac')) return { icon: 'wind', bg: 'bg-cyan-500' };
-    return { icon: 'wrench', bg: 'bg-orange-400' };
+    return { icon: 'wrench', bg: 'bg-blue-500' };
   }
 
   function vehicleServiceCard(s) {
     const cfg = serviceIconConfig(s.type);
-    const total = (s.parts || []).reduce((x, p) => x + (Number(p.qty)||0)*(Number(p.price)||0), 0)
-      + (Number(s.laborHours)||0)*(Number(s.laborRate)||0);
     return `
       <a href="#/services/${s.id}" class="flex items-center gap-3 p-3 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
         <div class="w-10 h-10 rounded-full ${cfg.bg} flex items-center justify-center flex-shrink-0 shadow-sm">
@@ -789,13 +910,9 @@
         </div>
         <div class="flex-1 min-w-0">
           <div class="text-xs text-slate-400 dark:text-slate-500">${U.fmtDate(s.date)}</div>
-          <div class="font-semibold text-sm truncate">${U.escape(s.type || t('service'))}</div>
-          ${s.mileage ? `<div class="text-xs text-slate-500 dark:text-slate-400">~${Number(s.mileage).toLocaleString()} km</div>` : ''}
+          ${s.mileage ? `<div class="text-xs text-slate-500 dark:text-slate-400">${Number(s.mileage).toLocaleString()} km</div>` : ''}
         </div>
-        <div class="flex items-center gap-2 flex-shrink-0">
-          ${total > 0 ? `<span class="text-sm font-semibold text-orange-600 dark:text-orange-400">${U.fmtMoney(total, state.settings.currency)}</span>` : ''}
-          ${icon('chevron-right', 'w-4 h-4 text-slate-300 dark:text-slate-600')}
-        </div>
+        ${icon('chevron-right', 'w-4 h-4 text-slate-300 dark:text-slate-600 flex-shrink-0')}
       </a>
     `;
   }
@@ -815,9 +932,7 @@
       const d = new Date(s.date);
       const mi = months.findIndex((m) => m.year === d.getFullYear() && m.month === d.getMonth());
       if (mi >= 0) {
-        const p = (s.parts || []).reduce((x, p) => x + (Number(p.qty)||0)*(Number(p.price)||0), 0);
-        const l = (Number(s.laborHours)||0)*(Number(s.laborRate)||0);
-        months[mi].total += p + l;
+        months[mi].total += 0;
       }
     });
 
@@ -880,10 +995,6 @@
     const c = customerById(v.customerId);
     const services = servicesForVehicle(id);
     const r = U.reminderStatus(v, services, state.settings);
-    const totalSpent = services.reduce((sum, s) => {
-      return sum + (s.parts || []).reduce((x, p) => x + (Number(p.qty)||0)*(Number(p.price)||0), 0)
-        + (Number(s.laborHours)||0)*(Number(s.laborRate)||0);
-    }, 0);
 
     $('#view').innerHTML = `
       <!-- Compact header -->
@@ -902,19 +1013,19 @@
           <div class="flex items-start justify-between gap-3 mb-3">
             <div class="flex-1 min-w-0">
               <div class="text-xs text-slate-400 dark:text-slate-500 font-medium uppercase tracking-wide mb-0.5">${t('vehicle_owner')}: ${U.escape(c?.name || '—')}</div>
-              <h2 class="text-2xl font-bold leading-tight">${U.escape(v.brand || '')} ${U.escape(v.model || '')} <span class="text-orange-500">${v.plate ? '(' + U.escape(v.plate) + ')' : v.year ? '(' + v.year + ')' : ''}</span></h2>
+              <h2 class="text-2xl font-bold leading-tight">${U.escape(v.brand || '')} ${U.escape(v.model || '')} <span class="text-blue-600">${v.plate ? '(' + U.escape(v.plate) + ')' : v.year ? '(' + v.year + ')' : ''}</span></h2>
               ${v.plate ? `<div class="text-sm text-slate-500 dark:text-slate-400 mt-0.5">${t('vehicle_plate')}: ${U.escape(v.plate)}</div>` : ''}
-              ${v.mileage ? `<div class="text-sm font-semibold text-orange-600 dark:text-orange-400 mt-1">${Number(v.mileage).toLocaleString()} km</div>` : ''}
+              ${v.mileage ? `<div class="text-sm font-semibold text-blue-700 dark:text-blue-500 mt-1">${Number(v.mileage).toLocaleString()} km</div>` : ''}
             </div>
-            <div class="w-20 h-16 bg-orange-50 dark:bg-orange-900/20 border border-orange-100 dark:border-orange-900/30 rounded-2xl flex items-center justify-center flex-shrink-0">
-              ${icon(vehicleIcon(v.type), 'w-10 h-10 text-orange-400')}
+            <div class="w-20 h-16 bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-900/30 rounded-2xl flex items-center justify-center flex-shrink-0">
+              ${icon(vehicleIcon(v.type), 'w-10 h-10 text-blue-500')}
             </div>
           </div>
 
           <!-- Action buttons -->
           <div class="flex gap-2 pb-3 overflow-x-auto no-scrollbar">
-            <a href="#/services/new?vehicle=${v.id}" class="bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold px-4 py-2 rounded-full flex items-center gap-1.5 whitespace-nowrap shadow-sm flex-shrink-0">${icon('plus','w-4 h-4')} Νέα Καταγραφή</a>
-            <a href="#/job-orders/new?vehicle=${v.id}" class="border border-orange-300 dark:border-orange-700 text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 text-sm font-medium px-4 py-2 rounded-full flex items-center gap-1.5 whitespace-nowrap flex-shrink-0">${icon('clipboard-check','w-4 h-4')} Εντολή</a>
+            <a href="#/services/new?vehicle=${v.id}" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-full flex items-center gap-1.5 whitespace-nowrap shadow-sm flex-shrink-0">${icon('plus','w-4 h-4')} Νέα Καταγραφή</a>
+            <a href="#/job-orders/new?vehicle=${v.id}" class="border border-blue-400 dark:border-blue-800 text-blue-700 dark:text-blue-500 bg-blue-50 dark:bg-blue-900/20 text-sm font-medium px-4 py-2 rounded-full flex items-center gap-1.5 whitespace-nowrap flex-shrink-0">${icon('clipboard-check','w-4 h-4')} Εντολή</a>
             <button id="send-reminder" class="border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-sm font-medium px-4 py-2 rounded-full flex items-center gap-1.5 whitespace-nowrap flex-shrink-0">${icon('bell','w-4 h-4')} ${t('send_reminder')}</button>
             <button id="send-history" class="border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-sm font-medium px-4 py-2 rounded-full flex items-center gap-1.5 whitespace-nowrap flex-shrink-0">${icon('share-2','w-4 h-4')} ${t('share')}</button>
           </div>
@@ -948,9 +1059,9 @@
               ` : ''}
             ` : `
               <div class="p-8 text-center">
-                <div class="w-14 h-14 mx-auto bg-orange-50 dark:bg-orange-900/20 rounded-full flex items-center justify-center mb-3 text-orange-400">${icon('wrench','w-7 h-7')}</div>
+                <div class="w-14 h-14 mx-auto bg-blue-50 dark:bg-blue-900/20 rounded-full flex items-center justify-center mb-3 text-blue-500">${icon('wrench','w-7 h-7')}</div>
                 <div class="text-slate-400 text-sm">${t('no_service_history')}</div>
-                <a href="#/services/new?vehicle=${v.id}" class="mt-3 inline-flex items-center gap-1 bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-full text-sm font-medium">${icon('plus','w-4 h-4')} Νέα Καταγραφή</a>
+                <a href="#/services/new?vehicle=${v.id}" class="mt-3 inline-flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-full text-sm font-medium">${icon('plus','w-4 h-4')} Νέα Καταγραφή</a>
               </div>
             `}
           </div>
@@ -959,8 +1070,7 @@
           <div class="sm:col-span-2 p-4 space-y-4">
             <div class="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm">
               <div class="flex items-center justify-between mb-3">
-                <h3 class="font-semibold text-sm">Έξοδα Συντήρησης</h3>
-                <span class="text-xs font-semibold text-orange-500">${U.fmtMoney(totalSpent, state.settings.currency)}</span>
+                <h3 class="font-semibold text-sm">Ιστορικό Service</h3>
               </div>
               <div style="height:140px"><canvas id="chart-expenses"></canvas></div>
             </div>
@@ -982,7 +1092,7 @@
         <div class="p-4 space-y-4">
           <div class="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm">
             <div class="grid grid-cols-2 gap-4 text-sm">
-              ${kv(t('vehicle_owner'), c ? `<a class="text-orange-600 dark:text-orange-400 font-semibold" href="#/customers/${c.id}">${U.escape(c.name)}</a>` : '—', true)}
+              ${kv(t('vehicle_owner'), c ? `<a class="text-blue-700 dark:text-blue-500 font-semibold" href="#/customers/${c.id}">${U.escape(c.name)}</a>` : '—', true)}
               ${kv(t('vehicle_type'), t('vehicle_type_' + (v.type || 'car')))}
               ${kv(t('vehicle_brand'), v.brand)}
               ${kv(t('vehicle_model'), v.model)}
@@ -1008,13 +1118,6 @@
               ${r.days != null ? `<div class="text-xs ${r.status==='overdue'?'text-red-500':r.status==='upcoming'?'text-amber-500':'text-slate-400'}">${r.status==='overdue'?t('overdue_by',{n:-r.days}):t('days_left',{n:r.days})}</div>` : ''}
             </div>
           </div>
-          <a href="#/parts?vehicle=${v.id}" class="flex items-center justify-between bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm hover:bg-orange-50 dark:hover:bg-orange-900/10">
-            <div class="flex items-center gap-3">
-              <div class="w-9 h-9 bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-400 rounded-xl flex items-center justify-center">${icon('package','w-5 h-5')}</div>
-              <span class="font-medium text-sm">${t('nav_parts')}</span>
-            </div>
-            ${icon('chevron-right','w-4 h-4 text-slate-400')}
-          </a>
         </div>
       `;
       refreshIcons();
@@ -1083,8 +1186,8 @@
       const matches = q ? sortedCustomers.filter((c) => c.name.toLowerCase().includes(q) || (c.phone || '').includes(q)) : sortedCustomers;
       if (!matches.length) return `<div class="px-3 py-4 text-sm text-slate-400 text-center">${t('no_results')}</div>`;
       return matches.slice(0, 12).map((c) => `
-        <button type="button" class="cust-pick-row w-full text-left px-3 py-2.5 flex items-center gap-3 hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-colors" data-cid="${c.id}" data-cname="${U.escape(c.name)}">
-          <div class="w-9 h-9 rounded-full bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300 flex items-center justify-center font-bold text-sm flex-shrink-0">${U.escape(c.name.charAt(0).toUpperCase())}</div>
+        <button type="button" class="cust-pick-row w-full text-left px-3 py-2.5 flex items-center gap-3 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors" data-cid="${c.id}" data-cname="${U.escape(c.name)}">
+          <div class="w-9 h-9 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-400 flex items-center justify-center font-bold text-sm flex-shrink-0">${U.escape(c.name.charAt(0).toUpperCase())}</div>
           <div class="min-w-0">
             <div class="font-medium text-sm truncate">${U.escape(c.name)}</div>
             ${c.phone ? `<div class="text-xs text-slate-400 truncate">${U.escape(c.phone)}</div>` : ''}
@@ -1106,8 +1209,8 @@
             <input type="hidden" name="customerId" id="vf-cid" value="${v.customerId || ''}" />
 
             <!-- Selected display -->
-            <div id="vf-csel" class="${preselectedCustomer ? '' : 'hidden'} flex items-center gap-3 p-3 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-xl">
-              <div class="w-10 h-10 rounded-full bg-orange-500 text-white flex items-center justify-center font-bold text-sm flex-shrink-0">${preselectedCustomer ? U.escape(preselectedCustomer.name.charAt(0).toUpperCase()) : ''}</div>
+            <div id="vf-csel" class="${preselectedCustomer ? '' : 'hidden'} flex items-center gap-3 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl">
+              <div class="w-10 h-10 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-sm flex-shrink-0">${preselectedCustomer ? U.escape(preselectedCustomer.name.charAt(0).toUpperCase()) : ''}</div>
               <div class="flex-1 min-w-0">
                 <div id="vf-csel-name" class="font-semibold truncate">${preselectedCustomer ? U.escape(preselectedCustomer.name) : ''}</div>
                 ${preselectedCustomer?.phone ? `<div class="text-xs text-slate-500">${U.escape(preselectedCustomer.phone)}</div>` : ''}
@@ -1121,10 +1224,9 @@
                 <div class="relative flex-1">
                   <div class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">${icon('search','w-4 h-4')}</div>
                   <input type="text" id="vf-cq" placeholder="${t('customer_search_placeholder')}" autocomplete="off"
-                    class="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                    class="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
-                ${micBtn('vf-cq')}
-                <a href="#/customers/new" class="w-10 h-10 flex items-center justify-center rounded-xl bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 hover:bg-orange-200 dark:hover:bg-orange-900/50 flex-shrink-0" title="${t('new_customer')}">
+                <a href="#/customers/new" class="w-10 h-10 flex items-center justify-center rounded-xl bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-500 hover:bg-blue-200 dark:hover:bg-blue-900/50 flex-shrink-0" title="${t('new_customer')}">
                   ${icon('user-plus','w-4 h-4')}
                 </a>
               </div>
@@ -1140,7 +1242,7 @@
               ${['car','moto','boat','truck'].map((tp) => `
                 <label class="cursor-pointer">
                   <input type="radio" name="type" value="${tp}" ${(v.type||'car')===tp?'checked':''} class="peer sr-only" />
-                  <div class="border border-slate-200 dark:border-slate-700 rounded-lg py-2 text-center text-xs peer-checked:bg-orange-500 peer-checked:text-white peer-checked:border-orange-500">
+                  <div class="border border-slate-200 dark:border-slate-700 rounded-lg py-2 text-center text-xs peer-checked:bg-blue-600 peer-checked:text-white peer-checked:border-blue-600">
                     ${icon(vehicleIcon(tp),'w-5 h-5 mx-auto mb-1')}
                     ${t('vehicle_type_'+tp)}
                   </div>
@@ -1158,8 +1260,8 @@
             <div>
               <label class="block text-sm font-medium mb-1">${t('vehicle_plate')}</label>
               <div class="flex gap-2">
-                <input type="text" name="plate" id="vf-plate" value="${U.escape(v.plate || '')}" autocomplete="off" spellcheck="false"
-                  class="flex-1 min-w-0 px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 uppercase tracking-widest focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                <input type="text" name="plate" id="vf-plate" value="${U.escape(v.plate || '')}" autocomplete="off" spellcheck="false" data-vi="1"
+                  class="flex-1 min-w-0 px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 uppercase tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 ${micBtn('vf-plate', { transform: 'plate' })}
               </div>
             </div>
@@ -1200,7 +1302,7 @@
           ${formTextArea('notes', t('notes'), v.notes, { voice: true })}
 
           <div class="flex gap-2 pt-2">
-            <button type="submit" class="flex-1 bg-orange-500 hover:bg-orange-600 text-white font-medium py-2.5 rounded-lg">${t('save')}</button>
+            <button type="submit" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 rounded-lg">${t('save')}</button>
             <button type="button" onclick="history.back()" class="flex-1 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 font-medium py-2.5 rounded-lg">${t('cancel')}</button>
           </div>
         </form>
@@ -1278,7 +1380,7 @@
     $('#view').innerHTML = `
       ${pageHeader(t('services'), {
         back: false,
-        actions: `<a href="#/services/new" class="bg-orange-500 hover:bg-orange-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1">${icon('plus','w-4 h-4')} ${t('add')}</a>`
+        actions: `<a href="#/services/new" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1">${icon('plus','w-4 h-4')} ${t('add')}</a>`
       })}
       <div class="max-w-5xl mx-auto p-4 pb-24 sm:pb-4">
         <div class="relative mb-4">
@@ -1319,10 +1421,6 @@
     if (!s) { go('/services'); return; }
     const v = vehicleById(s.vehicleId);
     const c = v ? customerById(v.customerId) : null;
-    const partsTotal = (s.parts || []).reduce((x, p) => x + (Number(p.qty) || 0) * (Number(p.price) || 0), 0);
-    const laborTotal = (Number(s.laborHours) || 0) * (Number(s.laborRate) || 0);
-    const grand = partsTotal + laborTotal;
-
     $('#view').innerHTML = `
       ${pageHeader(t('service'), {
         actions: `
@@ -1335,16 +1433,12 @@
           <div class="flex items-center justify-between mb-3">
             <div>
               <div class="text-xs text-slate-500 dark:text-slate-400">${U.fmtDate(s.date)}</div>
-              <div class="text-lg font-bold">${U.escape(s.type || '—')}</div>
-            </div>
-            <div class="text-right">
-              <div class="text-xs text-slate-500 dark:text-slate-400">${t('grand_total')}</div>
-              <div class="text-lg font-bold text-emerald-600 dark:text-emerald-400">${U.fmtMoney(grand, state.settings.currency)}</div>
+              <div class="text-lg font-bold">Service</div>
             </div>
           </div>
           <div class="grid grid-cols-2 gap-3 text-sm pt-3 border-t border-slate-100 dark:border-slate-700">
-            ${kv(t('vehicle'), v ? `<a class="text-orange-600 dark:text-orange-400" href="#/vehicles/${v.id}">${U.escape(vehicleLabel(v))}</a>` : '—', true)}
-            ${kv(t('customer'), c ? `<a class="text-orange-600 dark:text-orange-400" href="#/customers/${c.id}">${U.escape(c.name)}</a>` : '—', true)}
+            ${kv(t('vehicle'), v ? `<a class="text-blue-700 dark:text-blue-500" href="#/vehicles/${v.id}">${U.escape(vehicleLabel(v))}</a>` : '—', true)}
+            ${kv(t('customer'), c ? `<a class="text-blue-700 dark:text-blue-500" href="#/customers/${c.id}">${U.escape(c.name)}</a>` : '—', true)}
             ${kv(t('service_mileage'), s.mileage ? s.mileage + ' km' : '')}
             ${kv(t('service_mechanic'), s.mechanic)}
           </div>
@@ -1357,37 +1451,23 @@
           </div>
         ` : ''}
 
-        ${(s.parts && s.parts.length) ? `
+        ${(s.checklist && s.checklist.length) ? `
           <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4">
-            <div class="text-xs text-slate-500 dark:text-slate-400 mb-2">${t('service_parts')}</div>
-            <table class="w-full text-sm">
-              <thead><tr class="text-left text-xs text-slate-400 border-b border-slate-100 dark:border-slate-700">
-                <th class="py-1">${t('part_name')}</th>
-                <th class="py-1">${t('part_code')}</th>
-                <th class="py-1 text-right">${t('part_qty')}</th>
-                <th class="py-1 text-right">${t('part_price')}</th>
-                <th class="py-1 text-right">${t('service_total')}</th>
-              </tr></thead>
-              <tbody>
-                ${s.parts.map((p) => `
-                  <tr class="border-b border-slate-50 dark:border-slate-800 last:border-0">
-                    <td class="py-2">${U.escape(p.name)}</td>
-                    <td class="py-2 text-slate-500 dark:text-slate-400">${U.escape(p.code || '')}</td>
-                    <td class="py-2 text-right">${p.qty}</td>
-                    <td class="py-2 text-right">${U.fmtMoney(p.price, state.settings.currency)}</td>
-                    <td class="py-2 text-right font-medium">${U.fmtMoney((Number(p.qty)||0)*(Number(p.price)||0), state.settings.currency)}</td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
+            <div class="flex items-center justify-between mb-3">
+              <div class="text-sm font-semibold flex items-center gap-2">${icon('clipboard-list','w-4 h-4 text-blue-600')} Εργασίες που ζητήθηκαν</div>
+              <a href="#/job-orders/new?vehicle=${s.vehicleId}&service=${s.id}" class="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg flex items-center gap-1 font-medium">
+                ${icon('plus','w-3 h-3')} Δημιουργία Εντολής
+              </a>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              ${s.checklist.map((key) => `
+                <span class="inline-flex items-center gap-1 text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-400 px-2.5 py-1 rounded-full font-medium">
+                  ${icon('check','w-3 h-3')} ${taskLabel(key)}
+                </span>
+              `).join('')}
+            </div>
           </div>
         ` : ''}
-
-        <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-1 text-sm">
-          <div class="flex justify-between"><span class="text-slate-500">${t('parts_total')}</span><span>${U.fmtMoney(partsTotal, state.settings.currency)}</span></div>
-          <div class="flex justify-between"><span class="text-slate-500">${t('labor_total')} (${s.laborHours || 0}h × ${U.fmtMoney(s.laborRate || 0, state.settings.currency)})</span><span>${U.fmtMoney(laborTotal, state.settings.currency)}</span></div>
-          <div class="flex justify-between pt-2 border-t border-slate-100 dark:border-slate-700 font-bold text-base"><span>${t('grand_total')}</span><span class="text-emerald-600 dark:text-emerald-400">${U.fmtMoney(grand, state.settings.currency)}</span></div>
-        </div>
 
         ${(s.nextServiceDate || s.nextServiceMileage) ? `
           <div class="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-900/50 rounded-xl p-4">
@@ -1407,7 +1487,7 @@
 
         <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-2">
           <button id="btn-pdf" class="bg-red-500 hover:bg-red-600 text-white text-sm font-medium px-3 py-2.5 rounded-lg flex items-center justify-center gap-1">${icon('file-text','w-4 h-4')} PDF</button>
-          <button id="btn-share" class="bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium px-3 py-2.5 rounded-lg flex items-center justify-center gap-1">${icon('send','w-4 h-4')} ${t('send_to_customer')}</button>
+          <button id="btn-share" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-2.5 rounded-lg flex items-center justify-center gap-1">${icon('send','w-4 h-4')} ${t('send_to_customer')}</button>
           <button id="btn-print" class="bg-slate-500 hover:bg-slate-600 text-white text-sm font-medium px-3 py-2.5 rounded-lg flex items-center justify-center gap-1">${icon('printer','w-4 h-4')} ${t('print')}</button>
         </div>
       </div>
@@ -1443,8 +1523,6 @@
     if (!id) {
       s = {
         date: new Date().toISOString().slice(0, 10),
-        parts: [],
-        laborRate: state.settings.laborRate || 35,
       };
       const qs = new URLSearchParams(location.hash.split('?')[1] || '');
       if (qs.get('vehicle')) s.vehicleId = qs.get('vehicle');
@@ -1457,13 +1535,20 @@
         return `<option value="${v.id}" ${s.vehicleId === v.id ? 'selected' : ''}>${U.escape(vehicleLabel(v))} — ${U.escape(c?.name || '—')}</option>`;
       }).join('');
 
+    const checkedItems = new Set(s.checklist || []);
+    const initialVehicle = s.vehicleId ? vehicleById(s.vehicleId) : null;
+
+    function renderServiceTasks(vehicleType, selected) {
+      return renderTasksForVehicle(vehicleType || 'car', selected);
+    }
+
     $('#view').innerHTML = `
       ${pageHeader(id ? t('edit') + ' ' + t('service') : t('new_service'))}
       <div class="max-w-3xl mx-auto p-4 pb-24 sm:pb-4">
         <form id="service-form" class="space-y-4">
           <div>
             <label class="block text-sm font-medium mb-1">${t('vehicle')} <span class="text-red-500">*</span></label>
-            <select name="vehicleId" required class="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+            <select id="svc-vehicle" name="vehicleId" required class="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
               <option value="">—</option>
               ${vehicleOptions}
             </select>
@@ -1471,107 +1556,193 @@
 
           <div class="grid grid-cols-2 gap-3">
             ${formField('date', t('service_date'), s.date ? s.date.slice(0,10) : new Date().toISOString().slice(0,10), { type: 'date', required: true })}
-            <div>
-              <label class="block text-sm font-medium mb-1">${t('service_type')}</label>
-              <select name="type" class="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
-                ${['oil','regular','major','brakes','tires','inspection','repair','other'].map((tp) =>
-                  `<option value="${t('service_type_'+tp)}" ${s.type===t('service_type_'+tp)?'selected':''}>${t('service_type_'+tp)}</option>`
-                ).join('')}
-              </select>
-            </div>
+            ${formField('mileage', t('service_mileage'), s.mileage, { type: 'number' })}
           </div>
 
-          ${formField('mileage', t('service_mileage'), s.mileage, { type: 'number' })}
-          ${formTextArea('description', t('service_description'), s.description, { rows: 3, voice: true })}
-
-          <div>
+          <div class="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-900/40 rounded-xl p-4">
             <div class="flex items-center justify-between mb-2">
-              <label class="text-sm font-medium">${t('service_parts')}</label>
-              <button type="button" id="add-part" class="text-orange-600 dark:text-orange-400 text-sm flex items-center gap-1">${icon('plus','w-4 h-4')} ${t('parts_add')}</button>
+              <div class="text-sm font-semibold flex items-center gap-2">
+                ${icon('sparkles','w-4 h-4 text-indigo-600')} AI Προτάσεις κατασκευαστή
+              </div>
+              <button type="button" id="ai-suggest-btn" class="text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg flex items-center gap-1 font-medium">
+                ${icon('sparkles','w-3 h-3')} Ανάλυση οχήματος
+              </button>
             </div>
-            <div id="parts-list" class="space-y-2"></div>
+            <div id="ai-suggest-result" class="empty:hidden"></div>
           </div>
 
-          <div class="grid grid-cols-2 gap-3">
-            ${formField('laborHours', t('service_labor'), s.laborHours, { type: 'number', step: '0.25' })}
-            ${formField('laborRate', t('service_labor_rate'), s.laborRate || state.settings.laborRate, { type: 'number', step: '0.01' })}
+          <!-- Εργασίες που ζητά ο πελάτης -->
+          <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-3">
+            <div class="text-sm font-semibold flex items-center gap-2">${icon('clipboard-list','w-4 h-4 text-blue-600')} Εργασίες που ζητά ο πελάτης</div>
+            <div id="svc-tasks-grid">${renderServiceTasks(initialVehicle?.type, checkedItems)}</div>
+            <!-- Άλλο / custom -->
+            <div class="border-t border-slate-100 dark:border-slate-700 pt-3 space-y-2">
+              <div class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Άλλο</div>
+              <div id="svc-custom-tasks"></div>
+              <button type="button" id="svc-add-custom" class="text-sm text-blue-700 dark:text-blue-500 hover:underline flex items-center gap-1">${icon('plus','w-3 h-3')} Προσθήκη εργασίας</button>
+            </div>
           </div>
 
-          <div id="totals" class="bg-slate-100 dark:bg-slate-800 rounded-lg p-3 text-sm space-y-1"></div>
+          ${formTextArea('description', t('service_description'), s.description, { rows: 3, voice: true })}
 
           ${formField('mechanic', t('service_mechanic'), s.mechanic, { voice: true })}
 
           <div class="grid grid-cols-2 gap-3">
             ${formField('nextServiceDate', t('service_next_date'), s.nextServiceDate ? s.nextServiceDate.slice(0,10) : '', { type: 'date' })}
-            ${formField('nextServiceMileage', t('service_next_in_km'), s.nextServiceMileage, { type: 'number' })}
+            <div>
+              ${formField('nextServiceMileage', t('service_next_in_km'), s.nextServiceMileage, { type: 'number' })}
+              <div class="flex flex-wrap gap-1 mt-1.5">
+                ${[3000,5000,10000,15000,20000].map((d) => `<button type="button" data-km-offset="${d}" class="next-km-btn text-xs px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 hover:bg-blue-100 dark:hover:bg-blue-900/30 text-slate-600 dark:text-slate-300 hover:text-blue-800 dark:hover:text-blue-400 border border-slate-200 dark:border-slate-600 transition-colors">+${d >= 1000 ? (d/1000)+'k' : d} km</button>`).join('')}
+              </div>
+            </div>
           </div>
 
           <div class="flex gap-2 pt-2">
-            <button type="submit" class="flex-1 bg-orange-500 hover:bg-orange-600 text-white font-medium py-2.5 rounded-lg">${t('save')}</button>
+            <button type="submit" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 rounded-lg">${t('save')}</button>
             <button type="button" onclick="history.back()" class="flex-1 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 font-medium py-2.5 rounded-lg">${t('cancel')}</button>
           </div>
         </form>
       </div>
     `;
 
-    // Parts editor
-    let parts = (s.parts || []).map((p) => ({ ...p }));
-    const partsList = $('#parts-list');
-    function renderParts() {
-      partsList.innerHTML = parts.map((p, i) => `
-        <div class="grid grid-cols-12 gap-2 items-center bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2">
-          <input data-i="${i}" data-k="name" type="text" placeholder="${t('part_name')}" value="${U.escape(p.name||'')}" class="col-span-5 px-2 py-1.5 rounded border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm" />
-          <input data-i="${i}" data-k="code" type="text" placeholder="${t('part_code')}" value="${U.escape(p.code||'')}" class="col-span-3 px-2 py-1.5 rounded border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm" />
-          <input data-i="${i}" data-k="qty" type="number" placeholder="Qty" value="${p.qty||1}" class="col-span-1 px-2 py-1.5 rounded border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm" />
-          <input data-i="${i}" data-k="price" type="number" step="0.01" placeholder="€" value="${p.price||''}" class="col-span-2 px-2 py-1.5 rounded border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm" />
-          <button type="button" data-del="${i}" class="col-span-1 p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded">${icon('x','w-4 h-4')}</button>
-        </div>
-      `).join('');
-      refreshIcons();
-      partsList.querySelectorAll('input').forEach((inp) => {
-        inp.addEventListener('input', (e) => {
-          const i = +e.target.dataset.i;
-          const k = e.target.dataset.k;
-          parts[i][k] = e.target.value;
-          updateTotals();
-        });
-      });
-      partsList.querySelectorAll('[data-del]').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          parts.splice(+btn.dataset.del, 1);
-          renderParts();
-          updateTotals();
-        });
-      });
-    }
-    function updateTotals() {
-      const pt = parts.reduce((x, p) => x + (Number(p.qty) || 0) * (Number(p.price) || 0), 0);
-      const lh = Number($('[name=laborHours]').value) || 0;
-      const lr = Number($('[name=laborRate]').value) || 0;
-      const lt = lh * lr;
-      $('#totals').innerHTML = `
-        <div class="flex justify-between"><span class="text-slate-500">${t('parts_total')}</span><span>${U.fmtMoney(pt, state.settings.currency)}</span></div>
-        <div class="flex justify-between"><span class="text-slate-500">${t('labor_total')}</span><span>${U.fmtMoney(lt, state.settings.currency)}</span></div>
-        <div class="flex justify-between font-bold pt-1 border-t border-slate-200 dark:border-slate-700"><span>${t('grand_total')}</span><span class="text-emerald-600 dark:text-emerald-400">${U.fmtMoney(pt + lt, state.settings.currency)}</span></div>
-      `;
-    }
-    renderParts();
-    updateTotals();
-
-    $('#add-part').addEventListener('click', () => {
-      parts.push({ name: '', code: '', qty: 1, price: 0 });
-      renderParts();
+    // Update task grid when vehicle changes
+    $('#svc-vehicle').addEventListener('change', () => {
+      const vId = $('#svc-vehicle').value;
+      const veh = vehicleById(vId);
+      const grid = $('#svc-tasks-grid');
+      if (grid) { grid.innerHTML = renderServiceTasks(veh?.type, new Set()); refreshIcons(); }
     });
-    $('[name=laborHours]').addEventListener('input', updateTotals);
-    $('[name=laborRate]').addEventListener('input', updateTotals);
+
+    // Next service mileage quick-select (+Xk km buttons)
+    $$('.next-km-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const baseMileage = parseInt($('[name="mileage"]')?.value) || 0;
+        const nextInput = $('[name="nextServiceMileage"]');
+        if (nextInput) nextInput.value = baseMileage + Number(btn.dataset.kmOffset);
+      });
+    });
+
+    // AI Προτάσεις button
+    $('#ai-suggest-btn')?.addEventListener('click', async () => {
+      const vId = $('#svc-vehicle').value;
+      const veh = vehicleById(vId);
+      const resultEl = $('#ai-suggest-result');
+      if (!veh) { U.toast('Επίλεξε όχημα πρώτα', 'error'); return; }
+
+      const btn = $('#ai-suggest-btn');
+      btn.disabled = true;
+      btn.innerHTML = `${icon('loader','w-3 h-3 animate-spin')} Ανάλυση…`;
+      resultEl.innerHTML = `<div class="text-center text-slate-400 text-sm py-3 flex items-center justify-center gap-2">${icon('loader','w-4 h-4 animate-spin')} Αναζήτηση προτεινόμενων εργασιών…</div>`;
+      refreshIcons();
+
+      try {
+        const resp = await fetch('/api/maintenance-ai', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ brand: veh.brand, model: veh.model, year: veh.year, mileage: veh.mileage, engine: veh.engine, fuel: veh.fuel }),
+        });
+        const data = await resp.json();
+        if (!data.tasks || !data.tasks.length) { resultEl.innerHTML = '<p class="text-sm text-slate-400 py-2">Δεν βρέθηκαν προτάσεις.</p>'; return; }
+
+        const priorityStyle = { urgent: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300', recommended: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300', suggested: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' };
+        const priorityLabel = { urgent: 'Επείγον', recommended: 'Προτεινόμενο', suggested: 'Προαιρετικό' };
+
+        resultEl.innerHTML = `
+          ${data.note ? `<p class="text-xs text-slate-500 mb-3 italic">${U.escape(data.note)}</p>` : ''}
+          <div class="space-y-2">
+            ${data.tasks.map((task, i) => `
+              <div class="flex items-start gap-2 p-2 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                <div class="flex-1 min-w-0">
+                  <div class="text-sm font-medium">${U.escape(task.name)}</div>
+                  ${task.reason ? `<div class="text-xs text-slate-400 mt-0.5">${U.escape(task.reason)}</div>` : ''}
+                </div>
+                <span class="text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${priorityStyle[task.priority] || priorityStyle.suggested}">${priorityLabel[task.priority] || 'Πρόταση'}</span>
+                <button type="button" data-ai-task="${U.escape(task.name)}" class="ai-add-task text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-2 py-1 rounded-lg flex-shrink-0">+ Προσθήκη</button>
+              </div>
+            `).join('')}
+          </div>
+        `;
+
+        // Fuzzy-match AI task name to a visible preset checkbox (handles Greek inflections)
+        function matchAiToPreset(aiName) {
+          const norm = (s) => s.toLowerCase().replace(/[^α-ωάέήίόύώa-z0-9\s]/gi, ' ').split(/\s+/).filter((w) => w.length >= 4);
+          const aiWords = norm(aiName);
+          if (!aiWords.length) return null;
+          let bestKey = null, bestScore = 0;
+          $$('#svc-tasks-grid input[data-task]').forEach((cb) => {
+            const lbl = cb.closest('label')?.querySelector('span')?.textContent || '';
+            const lWords = norm(lbl);
+            let overlap = 0;
+            for (const aw of aiWords) {
+              if (lWords.some((lw) => aw === lw || aw.startsWith(lw.slice(0, 4)) || lw.startsWith(aw.slice(0, 4)))) overlap++;
+            }
+            if (overlap >= Math.min(2, aiWords.length) && overlap > bestScore) { bestScore = overlap; bestKey = cb.dataset.task; }
+          });
+          return bestKey;
+        }
+
+        // Wire add buttons — tick matching preset or add as custom
+        resultEl.querySelectorAll('.ai-add-task').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const presetKey = matchAiToPreset(btn.dataset.aiTask);
+            if (presetKey) {
+              const cb = $('#svc-tasks-grid input[data-task="' + presetKey + '"]');
+              if (cb && !cb.checked) {
+                cb.checked = true;
+                const row = cb.closest('label');
+                if (row) {
+                  row.classList.add('ring-2', 'ring-indigo-400');
+                  setTimeout(() => row.classList.remove('ring-2', 'ring-indigo-400'), 2000);
+                  row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+              }
+            } else {
+              addSvcCustomRow(btn.dataset.aiTask);
+            }
+            btn.textContent = '✓';
+            btn.disabled = true;
+            btn.className = btn.className.replace('bg-indigo-600 hover:bg-indigo-700', 'bg-emerald-600');
+          });
+        });
+      } catch (e) {
+        resultEl.innerHTML = '<p class="text-sm text-red-400 py-2">Σφάλμα σύνδεσης με AI.</p>';
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = `${icon('sparkles','w-3 h-3')} Ανάλυση οχήματος`;
+        refreshIcons();
+      }
+    });
+
+    // Custom tasks
+    function addSvcCustomRow(value = '') {
+      const container = $('#svc-custom-tasks');
+      const div = document.createElement('div');
+      div.className = 'flex gap-2 items-center svc-custom-row';
+      const uid = `svc-ct-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      div.innerHTML = `
+        <input id="${uid}" type="text" data-vi="1" class="svc-custom-input flex-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm" value="${U.escape(value)}" placeholder="Περιγραφή εργασίας…" />
+        ${micBtn(uid)}
+        <button type="button" class="svc-remove-custom p-2 text-red-400 hover:text-red-600 flex-shrink-0">${icon('x','w-4 h-4')}</button>
+      `;
+      div.querySelector('.svc-remove-custom').addEventListener('click', () => div.remove());
+      container.appendChild(div);
+      if (!value) div.querySelector('input').focus();
+      refreshIcons();
+      initVoiceButtons();
+    }
+
+    // Pre-populate custom tasks from saved checklist (custom: prefix)
+    (s.checklist || []).filter((k) => k.startsWith('custom:')).forEach((k) => addSvcCustomRow(k.slice(7)));
+
+    $('#svc-add-custom').addEventListener('click', () => addSvcCustomRow());
 
     $('#service-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const data = formData(e.target);
-      data.parts = parts.filter((p) => p.name && (Number(p.qty) > 0));
+      const standardTasks = Array.from($('#svc-tasks-grid').querySelectorAll('input[type=checkbox]:checked')).map((cb) => cb.dataset.task);
+      const customTasks = Array.from($$('.svc-custom-input')).map((inp) => inp.value.trim()).filter(Boolean).map((v) => 'custom:' + v);
+      data.checklist = [...standardTasks, ...customTasks];
       if (data.mileage) data.mileage = Number(data.mileage);
-      if (data.laborHours) data.laborHours = Number(data.laborHours);
-      if (data.laborRate) data.laborRate = Number(data.laborRate);
       if (data.nextServiceMileage) data.nextServiceMileage = Number(data.nextServiceMileage);
       if (id) data.id = id;
       // auto compute nextServiceDate if blank
@@ -1590,8 +1761,27 @@
         }
       }
 
-      U.toast(t('saved'));
-      go('/services/' + saved.id);
+      // Auto-create job order from service tasks
+      if (data.checklist && data.checklist.length) {
+        const veh = vehicleById(data.vehicleId);
+        const joData = {
+          vehicleId: data.vehicleId,
+          customerId: veh?.customerId || null,
+          tasks: data.checklist,
+          notes: data.description || '',
+          status: 'pending',
+          completedTasks: {},
+          serviceId: saved.id,
+          createdAt: new Date().toISOString(),
+        };
+        const savedJo = await DB.add('job_orders', joData);
+        await loadAll();
+        U.toast('Εντολή εργασίας δημιουργήθηκε');
+        go('/job-orders/' + savedJo.id + '/work');
+      } else {
+        U.toast(t('saved'));
+        go('/services/' + saved.id);
+      }
     });
   }
 
@@ -1674,7 +1864,7 @@
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
           <button id="send-wa" class="bg-green-500 hover:bg-green-600 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('message-circle','w-4 h-4')} WhatsApp</button>
           <button id="send-vi" class="bg-purple-500 hover:bg-purple-600 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('phone','w-4 h-4')} Viber</button>
-          <button id="send-sms" class="bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('message-square','w-4 h-4')} SMS</button>
+          <button id="send-sms" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('message-square','w-4 h-4')} SMS</button>
           <button id="send-em" class="bg-slate-500 hover:bg-slate-600 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('mail','w-4 h-4')} Email</button>
         </div>
       </div>
@@ -1703,9 +1893,6 @@
     lines.push(`${v ? vehicleLabel(v) : ''}`);
     if (s.type) lines.push(`${t('service_type')}: ${s.type}`);
     if (s.description) lines.push(`${t('service_description')}: ${s.description}`);
-    const partsTotal = (s.parts || []).reduce((x, p) => x + (Number(p.qty) || 0) * (Number(p.price) || 0), 0);
-    const laborTotal = (Number(s.laborHours) || 0) * (Number(s.laborRate) || 0);
-    lines.push(`${t('grand_total')}: ${U.fmtMoney(partsTotal + laborTotal, state.settings.currency)}`);
     if (s.nextServiceDate) lines.push(`${t('next_service_due')}: ${U.fmtDate(s.nextServiceDate)}`);
     const msg = lines.join('\n');
 
@@ -1718,7 +1905,7 @@
             <button id="send-vi" class="bg-purple-500 hover:bg-purple-600 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('phone','w-4 h-4')} Viber</button>
           ` : ''}
           ${c?.email ? `<button id="send-em" class="bg-slate-500 hover:bg-slate-600 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('mail','w-4 h-4')} Email</button>` : ''}
-          <button id="send-copy" class="bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('copy','w-4 h-4')} ${t('copy')}</button>
+          <button id="send-copy" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('copy','w-4 h-4')} ${t('copy')}</button>
         </div>
       </div>
     `);
@@ -1740,9 +1927,7 @@
     lines.push(`${t('vehicle_history')} - ${vehicleLabel(v)}`);
     lines.push('');
     services.forEach((s) => {
-      const partsTotal = (s.parts || []).reduce((x, p) => x + (Number(p.qty) || 0) * (Number(p.price) || 0), 0);
-      const laborTotal = (Number(s.laborHours) || 0) * (Number(s.laborRate) || 0);
-      lines.push(`• ${U.fmtDate(s.date)} - ${s.type || '—'} (${s.mileage || 0}km) - ${U.fmtMoney(partsTotal+laborTotal, state.settings.currency)}`);
+      lines.push(`• ${U.fmtDate(s.date)} - ${s.mileage ? s.mileage + 'km' : ''}`);
       if (s.description) lines.push(`  ${s.description.split('\n')[0]}`);
     });
     const msg = lines.join('\n');
@@ -1754,7 +1939,7 @@
             <button id="send-wa" class="bg-green-500 hover:bg-green-600 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('message-circle','w-4 h-4')} WhatsApp</button>
             <button id="send-vi" class="bg-purple-500 hover:bg-purple-600 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('phone','w-4 h-4')} Viber</button>
           ` : ''}
-          <button id="send-copy" class="bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('copy','w-4 h-4')} ${t('copy')}</button>
+          <button id="send-copy" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('copy','w-4 h-4')} ${t('copy')}</button>
         </div>
       </div>
     `);
@@ -1773,64 +1958,66 @@
   //  AI SCAN
   // =========================================================
   async function renderAIScan() {
-    const photos = [null, null, null]; // [license-front, license-back, odometer]
+    // photos[0]=εξώφυλλο, photos[1]=στοιχεία οχήματος, photos[2]=ονομαστικά, photos[3]=odometer
+    const photos = [null, null, null, null];
+
+    function photoSlot(idx, label, borderColor, bgColor, btnColor, btnHover) {
+      return `
+        <div class="border-2 border-dashed ${borderColor} rounded-xl p-2 flex flex-col items-center gap-1.5 min-h-[130px] justify-center ${bgColor}">
+          <div id="prev${idx}" class="hidden w-full"><img id="img${idx}" class="rounded-lg w-full object-cover max-h-20" /></div>
+          <div class="text-xs font-semibold text-slate-600 dark:text-slate-300 text-center leading-tight">${label}</div>
+          <label id="lbl${idx}" class="${btnColor} ${btnHover} text-white px-2.5 py-1.5 rounded-lg cursor-pointer inline-flex items-center gap-1 text-xs font-medium">
+            ${icon('camera','w-3.5 h-3.5')} Φωτό
+            <input type="file" id="file${idx}" accept="image/*" capture="environment" class="hidden" />
+          </label>
+        </div>`;
+    }
 
     $('#view').innerHTML = `
       ${pageHeader(t('ai_scan_title'))}
       <div class="max-w-2xl mx-auto p-4 pb-24 sm:pb-4 space-y-4">
 
         <div class="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-900/50 rounded-xl p-3 text-sm text-purple-800 dark:text-purple-200">
-          ${t('ai_scan_instructions')}
+          ${icon('info','w-4 h-4 inline mr-1')} Τράβηξε <strong>3 φωτογραφίες</strong> της άδειας κυκλοφορίας — εξώφυλλο, σελίδα στοιχείων οχήματος και σελίδα ονομαστικών στοιχείων.
         </div>
 
-        <!-- License photos (front + back) -->
-        <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-3">
-          <div class="flex items-center gap-2 text-sm font-semibold">
-            ${icon('file-text','w-4 h-4 text-purple-500')}
-            <span>${t('ai_scan_license_section')}</span>
+        <!-- 3 registration page photos -->
+        <div id="photo-sections" class="space-y-4">
+          <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-3">
+            <div class="flex items-center gap-2 text-sm font-semibold">
+              ${icon('book-open','w-4 h-4 text-purple-500')}
+              <span>Άδεια κυκλοφορίας — 3 σελίδες</span>
+            </div>
+            <div class="grid grid-cols-3 gap-2">
+              ${photoSlot(0,'Εξώφυλλο (πινακίδα)','border-purple-300 dark:border-purple-700','bg-purple-50/50 dark:bg-purple-900/10','bg-purple-500','hover:bg-purple-600')}
+              ${photoSlot(1,'Ονομαστικά στοιχεία','border-indigo-200 dark:border-indigo-800','bg-indigo-50/30 dark:bg-indigo-900/10','bg-indigo-500','hover:bg-indigo-600')}
+              ${photoSlot(2,'Στοιχεία οχήματος','border-purple-200 dark:border-purple-800','','bg-purple-400','hover:bg-purple-500')}
+            </div>
+            <p class="text-xs text-slate-400 dark:text-slate-500 text-center">Μπορείς να τραβήξεις μόνο όσες σελίδες χρειάζεσαι</p>
           </div>
-          <div class="grid grid-cols-2 gap-3">
-            <div class="border-2 border-dashed border-purple-200 dark:border-purple-800 rounded-xl p-3 flex flex-col items-center gap-2 min-h-[140px] justify-center bg-purple-50/40 dark:bg-purple-900/10">
-              <div id="prev0" class="hidden w-full"><img id="img0" class="rounded-lg w-full object-cover max-h-24" /></div>
-              <div class="text-xs font-medium text-slate-500 dark:text-slate-400">${t('ai_scan_front')}</div>
-              <label id="lbl0" class="bg-purple-500 hover:bg-purple-600 text-white px-3 py-1.5 rounded-lg cursor-pointer inline-flex items-center gap-1.5 text-xs font-medium">
+
+          <!-- Odometer photo (optional) -->
+          <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-3">
+            <div class="flex items-center gap-2 text-sm font-semibold">
+              ${icon('gauge','w-4 h-4 text-amber-500')}
+              <span>${t('ai_scan_odometer')}</span>
+              <span class="text-xs font-normal text-slate-400">(${t('optional')})</span>
+            </div>
+            <div class="border-2 border-dashed border-amber-200 dark:border-amber-800/50 rounded-xl p-3 flex flex-col items-center gap-2 min-h-[100px] justify-center bg-amber-50/40 dark:bg-amber-900/10">
+              <div id="prev3" class="hidden w-full"><img id="img3" class="rounded-lg w-full object-cover max-h-20 mx-auto" style="max-width:180px" /></div>
+              <div class="text-xs text-slate-500 dark:text-slate-400 text-center">${t('ai_scan_odometer_tip')}</div>
+              <label id="lbl3" class="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg cursor-pointer inline-flex items-center gap-1.5 text-xs font-medium">
                 ${icon('camera','w-3.5 h-3.5')} ${t('take_photo')}
-                <input type="file" id="file0" accept="image/*" capture="environment" class="hidden" />
+                <input type="file" id="file3" accept="image/*" capture="environment" class="hidden" />
               </label>
             </div>
-            <div class="border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl p-3 flex flex-col items-center gap-2 min-h-[140px] justify-center">
-              <div id="prev1" class="hidden w-full"><img id="img1" class="rounded-lg w-full object-cover max-h-24" /></div>
-              <div class="text-xs font-medium text-slate-500 dark:text-slate-400">${t('ai_scan_back')}</div>
-              <label id="lbl1" class="bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 px-3 py-1.5 rounded-lg cursor-pointer inline-flex items-center gap-1.5 text-xs font-medium">
-                ${icon('camera','w-3.5 h-3.5')} ${t('take_photo')}
-                <input type="file" id="file1" accept="image/*" capture="environment" class="hidden" />
-              </label>
-            </div>
           </div>
-          <p class="text-xs text-slate-400 dark:text-slate-500 text-center">${t('ai_scan_tip')}</p>
-        </div>
 
-        <!-- Odometer photo -->
-        <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-3">
-          <div class="flex items-center gap-2 text-sm font-semibold">
-            ${icon('gauge','w-4 h-4 text-amber-500')}
-            <span>${t('ai_scan_odometer')}</span>
-            <span class="text-xs font-normal text-slate-400">(${t('optional')})</span>
-          </div>
-          <div class="border-2 border-dashed border-amber-200 dark:border-amber-800/50 rounded-xl p-3 flex flex-col items-center gap-2 min-h-[120px] justify-center bg-amber-50/40 dark:bg-amber-900/10">
-            <div id="prev2" class="hidden w-full"><img id="img2" class="rounded-lg w-full object-cover max-h-24 mx-auto" style="max-width:200px" /></div>
-            <div class="text-xs text-slate-500 dark:text-slate-400 text-center">${t('ai_scan_odometer_tip')}</div>
-            <label id="lbl2" class="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg cursor-pointer inline-flex items-center gap-1.5 text-xs font-medium">
-              ${icon('camera','w-3.5 h-3.5')} ${t('take_photo')}
-              <input type="file" id="file2" accept="image/*" capture="environment" class="hidden" />
-            </label>
-          </div>
+          <!-- Analyze button — visible after at least 1 license photo -->
+          <button id="btn-analyze" class="hidden w-full bg-purple-500 hover:bg-purple-600 text-white font-semibold py-3.5 rounded-xl flex items-center justify-center gap-2 text-base">
+            ${icon('sparkles','w-5 h-5')} ${t('ai_scan_analyze')}
+          </button>
         </div>
-
-        <!-- Analyze button — visible after at least 1 license photo -->
-        <button id="btn-analyze" class="hidden w-full bg-purple-500 hover:bg-purple-600 text-white font-medium py-3 rounded-xl flex items-center justify-center gap-2">
-          ${icon('sparkles','w-5 h-5')} ${t('ai_scan_analyze')}
-        </button>
 
         <div id="scan-result" class="hidden"></div>
       </div>
@@ -1838,28 +2025,41 @@
     refreshIcons();
 
     function updateAnalyzeBtn() {
-      $('#btn-analyze').classList.toggle('hidden', !(photos[0] || photos[1]));
+      const hasLicense = photos[0] || photos[1] || photos[2];
+      $('#btn-analyze').classList.toggle('hidden', !hasLicense);
     }
+
+    const retakeCls = 'bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 px-2.5 py-1.5 rounded-lg cursor-pointer inline-flex items-center gap-1 text-xs font-medium';
 
     async function handleFile(idx, e) {
       const file = e.target.files[0];
       if (!file) return;
       const dataUrl = await U.readFileAsDataURL(file);
-      const compressed = await U.compressImage(dataUrl, 1600, 0.85);
+      const compressed = await U.compressImage(dataUrl, 2400, 0.92);
       photos[idx] = compressed;
       $(`#img${idx}`).src = compressed;
       $(`#prev${idx}`).classList.remove('hidden');
-      const retakeCls = 'bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 px-3 py-1.5 rounded-lg cursor-pointer inline-flex items-center gap-1.5 text-xs font-medium';
       $(`#lbl${idx}`).className = retakeCls;
+      $(`#lbl${idx}`).innerHTML = `${icon('refresh-cw','w-3.5 h-3.5')} Ξανά<input type="file" id="file${idx}" accept="image/*" capture="environment" class="hidden" />`;
+      $(`#file${idx}`).addEventListener('change', (ev) => handleFile(idx, ev));
+      refreshIcons();
       updateAnalyzeBtn();
     }
 
-    $('#file0').addEventListener('change', (e) => handleFile(0, e));
-    $('#file1').addEventListener('change', (e) => handleFile(1, e));
-    $('#file2').addEventListener('change', (e) => handleFile(2, e));
+    for (let i = 0; i <= 3; i++) {
+      $(`#file${i}`).addEventListener('change', (e) => handleFile(i, e));
+    }
+
+    // Show photo section again — called from retake buttons in results
+    function showPhotoSection() {
+      $('#scan-result').classList.add('hidden');
+      $('#photo-sections').classList.remove('hidden');
+      $('#view').scrollTo({ top: 0, behavior: 'smooth' });
+    }
+    window._scanRetake = showPhotoSection;
 
     $('#btn-analyze').addEventListener('click', async () => {
-      const regPhotos = [photos[0], photos[1]].filter(Boolean);
+      const regPhotos = [photos[0], photos[1], photos[2]].filter(Boolean);
       if (!regPhotos.length) return;
 
       const btn = $('#btn-analyze');
@@ -1867,16 +2067,26 @@
       btn.innerHTML = `<span class="inline-block animate-spin mr-2">${icon('loader-2','w-5 h-5 inline')}</span>${t('ai_scan_processing')}`;
       refreshIcons();
 
-      const data = await U.aiExtractRegistration(regPhotos, photos[2] || null);
+      const data = await U.aiExtractRegistration(regPhotos, photos[3] || null);
 
       btn.disabled = false;
       btn.innerHTML = `${icon('sparkles','w-5 h-5')} ${t('ai_scan_analyze')}`;
       refreshIcons();
 
+      // Hide photo section, show result
+      $('#photo-sections').classList.add('hidden');
       const result = $('#scan-result');
       result.classList.remove('hidden');
+
       if (!data) {
-        result.innerHTML = `<div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-900/50 rounded-xl p-4 text-sm text-red-600 dark:text-red-400">${t('error_generic')}</div>`;
+        result.innerHTML = `
+          <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-900/50 rounded-xl p-4 space-y-3">
+            <p class="text-sm text-red-600 dark:text-red-400">${t('error_generic')}</p>
+            <button onclick="window._scanRetake()" class="w-full bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 font-medium py-2.5 rounded-lg text-sm flex items-center justify-center gap-2">
+              ${icon('camera','w-4 h-4')} Ξανά φωτογράφηση
+            </button>
+          </div>`;
+        refreshIcons();
         return;
       }
 
@@ -1889,8 +2099,12 @@
           </div>
         </div>` : '';
 
-      const mileageHtml = data.mileage ? `
-        ${kv(t('ai_scan_mileage_found'), Number(data.mileage).toLocaleString() + ' km')}` : '';
+      const mileageHtml = data.mileage ? `${kv(t('ai_scan_mileage_found'), Number(data.mileage).toLocaleString() + ' km')}` : '';
+
+      const retakeBtn = `
+        <button onclick="window._scanRetake()" class="flex-1 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 font-medium py-2.5 rounded-lg flex items-center justify-center gap-1.5 text-sm">
+          ${icon('camera','w-4 h-4')} ${t('ai_scan_retake')}
+        </button>`;
 
       const ownerQuestionHtml = data.ownerName ? `
         <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-900/50 rounded-xl p-4 space-y-3">
@@ -1904,119 +2118,183 @@
               ${icon('user-x','w-4 h-4')} ${t('ai_scan_owner_diff')}
             </button>
           </div>
-        </div>` : `
+        </div>
+        <div class="flex gap-2">${retakeBtn}</div>` : `
         <div class="flex gap-2">
           <button id="apply-scan" class="flex-1 bg-purple-500 hover:bg-purple-600 text-white font-medium py-2.5 rounded-lg">${t('ai_scan_apply')}</button>
-          <button onclick="go('/scan')" class="flex-1 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 font-medium py-2.5 rounded-lg">${t('ai_scan_retake')}</button>
+          ${retakeBtn}
         </div>`;
 
-      result.innerHTML = `
-        <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-4">
-          <h3 class="font-semibold flex items-center gap-2">${icon('car','w-4 h-4 text-orange-500')} ${t('vehicle')}</h3>
-          <div class="grid grid-cols-2 gap-3 text-sm">
-            ${ownerHtml}
-            ${kv(t('vehicle_plate'), data.plate)}
-            ${kv(t('vehicle_vin'), data.vin, true)}
-            ${kv(t('vehicle_brand'), data.brand)}
-            ${kv(t('vehicle_model'), data.model)}
-            ${kv(t('vehicle_year'), data.year)}
-            ${kv(t('vehicle_engine'), data.engine ? data.engine + ' cc' : '')}
-            ${kv(t('vehicle_fuel'), data.fuel ? t('fuel_' + data.fuel) : '')}
-            ${kv(t('vehicle_color'), data.color)}
-            ${mileageHtml}
-          </div>
-          ${ownerQuestionHtml}
-          ${data.ownerName ? `<div class="flex gap-2 pt-1">
-            <button onclick="go('/scan')" class="flex-1 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 font-medium py-2 rounded-lg text-sm">${t('ai_scan_retake')}</button>
-          </div>` : ''}
-        </div>
-      `;
-      refreshIcons();
+      // Mutable copy so edits persist between re-renders
+      let scanData = { ...data };
 
       function applyAndGo(includeOwner) {
-        const payload = { ...data, regPhoto: photos[0] };
-        if (data.mileage) payload.mileage = data.mileage;
+        const payload = { ...scanData, regPhoto: photos[0] };
         sessionStorage.setItem('ai_scan_result', JSON.stringify(payload));
-        if (includeOwner && data.ownerName) {
-          sessionStorage.setItem('ai_scan_customer_name', data.ownerName);
+        if (includeOwner && scanData.ownerName) {
+          sessionStorage.setItem('ai_scan_customer_name', scanData.ownerName);
         } else {
           sessionStorage.removeItem('ai_scan_customer_name');
         }
         go('/vehicles/new');
       }
 
-      if (data.ownerName) {
+      function inp(name, value, type = 'text', cls = '') {
+        const v = value != null ? U.escape(String(value)) : '';
+        return `<input name="${name}" type="${type}" value="${v}" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm ${cls}" />`;
+      }
+      function sel(name, options, current) {
+        return `<select name="${name}" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm">
+          ${options.map(([v,l]) => `<option value="${v}"${current===v?' selected':''}>${l}</option>`).join('')}
+        </select>`;
+      }
+
+      function renderResult() {
+        const d = scanData;
+        const ownerBlock = d.ownerName ? `
+          <div class="col-span-2 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 rounded-lg p-3 flex items-center gap-2">
+            ${icon('user','w-4 h-4 text-indigo-500 flex-shrink-0')}
+            <div>
+              <div class="text-xs font-semibold text-indigo-600 dark:text-indigo-400 mb-0.5">${t('ai_scan_owner_label')}</div>
+              <div class="text-sm font-bold text-indigo-900 dark:text-indigo-100">${U.escape(d.ownerName)}</div>
+            </div>
+          </div>` : '';
+
+        result.innerHTML = `
+          <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-4">
+            <div class="flex items-center justify-between">
+              <h3 class="font-semibold flex items-center gap-2">${icon('car','w-4 h-4 text-blue-600')} Αποτελέσματα σάρωσης</h3>
+              <button id="btn-edit-scan" class="flex items-center gap-1 text-xs text-slate-500 hover:text-blue-600 px-2 py-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700">
+                ${icon('pencil','w-3.5 h-3.5')} Επεξεργασία
+              </button>
+            </div>
+            <div class="grid grid-cols-2 gap-3 text-sm">
+              ${ownerBlock}
+              ${kv('Αριθμός Κυκλοφορίας', d.plate)}
+              ${kv('Αριθμός Πλαισίου (VIN)', d.vin, true)}
+              ${kv(t('vehicle_brand'), d.brand)}
+              ${kv(t('vehicle_model'), d.model)}
+              ${kv(t('vehicle_year'), d.year)}
+              ${kv('Κυβισμός', d.engine ? d.engine + ' cc' : '')}
+              ${kv('Καύσιμο', d.fuel ? t('fuel_' + d.fuel) : '')}
+              ${kv('Χρώμα', d.color)}
+              ${d.mileage ? kv('Χιλιόμετρα', Number(d.mileage).toLocaleString() + ' km') : ''}
+            </div>
+            ${d.ownerName ? `
+              <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-900/50 rounded-xl p-4 space-y-3">
+                <p class="text-sm font-medium text-blue-900 dark:text-blue-100">${t('ai_scan_owner_question')}</p>
+                <p class="text-xs text-blue-700 dark:text-blue-300 font-medium">${U.escape(d.ownerName)}</p>
+                <div class="flex gap-2">
+                  <button id="apply-with-owner" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2.5 rounded-lg flex items-center justify-center gap-1.5">
+                    ${icon('user-check','w-4 h-4')} ${t('ai_scan_owner_same')}
+                  </button>
+                  <button id="apply-vehicle-only" class="flex-1 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 text-sm font-medium py-2.5 rounded-lg flex items-center justify-center gap-1.5">
+                    ${icon('user-x','w-4 h-4')} ${t('ai_scan_owner_diff')}
+                  </button>
+                </div>
+              </div>` : `
+              <div class="flex gap-2">
+                <button id="apply-scan" class="flex-1 bg-purple-500 hover:bg-purple-600 text-white font-medium py-2.5 rounded-lg">${t('ai_scan_apply')}</button>
+              </div>`}
+            <button onclick="window._scanRetake()" class="w-full bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 font-medium py-2 rounded-lg flex items-center justify-center gap-1.5 text-sm text-slate-600 dark:text-slate-300">
+              ${icon('camera','w-4 h-4')} ${t('ai_scan_retake')}
+            </button>
+          </div>`;
+        refreshIcons();
+        $('#btn-edit-scan')?.addEventListener('click', renderEditForm);
         $('#apply-with-owner')?.addEventListener('click', () => applyAndGo(true));
         $('#apply-vehicle-only')?.addEventListener('click', () => applyAndGo(false));
-      } else {
         $('#apply-scan')?.addEventListener('click', () => applyAndGo(false));
       }
+
+      function renderEditForm() {
+        const d = scanData;
+        const fuelOpts = [['','—'],['gasoline','Βενζίνη'],['diesel','Diesel'],['lpg','Υγραέριο'],['hybrid','Υβριδικό'],['electric','Ηλεκτρικό']];
+        const typeOpts = [['car','Αυτοκίνητο'],['moto','Μοτοσυκλέτα'],['truck','Φορτηγό'],['boat','Σκάφος']];
+
+        result.innerHTML = `
+          <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-4">
+            <h3 class="font-semibold flex items-center gap-2">${icon('pencil','w-4 h-4 text-blue-600')} Επεξεργασία στοιχείων</h3>
+            <form id="scan-edit-form" class="space-y-3">
+              <div class="grid grid-cols-2 gap-3">
+                <div class="space-y-1">
+                  <label class="text-xs font-medium text-slate-500">Αριθμός Κυκλοφορίας</label>
+                  ${inp('plate', d.plate, 'text', 'font-bold tracking-widest')}
+                </div>
+                <div class="space-y-1">
+                  <label class="text-xs font-medium text-slate-500">Τύπος οχήματος</label>
+                  ${sel('type', typeOpts, d.type || 'car')}
+                </div>
+              </div>
+              <div class="space-y-1">
+                <label class="text-xs font-medium text-slate-500">Αριθμός Πλαισίου — VIN (17 χαρ.)</label>
+                ${inp('vin', d.vin, 'text', 'font-mono tracking-wider uppercase')}
+              </div>
+              <div class="grid grid-cols-2 gap-3">
+                <div class="space-y-1">
+                  <label class="text-xs font-medium text-slate-500">Μάρκα</label>
+                  ${inp('brand', d.brand)}
+                </div>
+                <div class="space-y-1">
+                  <label class="text-xs font-medium text-slate-500">Μοντέλο</label>
+                  ${inp('model', d.model)}
+                </div>
+                <div class="space-y-1">
+                  <label class="text-xs font-medium text-slate-500">Έτος</label>
+                  ${inp('year', d.year, 'number')}
+                </div>
+                <div class="space-y-1">
+                  <label class="text-xs font-medium text-slate-500">Κυβισμός (cc)</label>
+                  ${inp('engine', d.engine, 'number')}
+                </div>
+                <div class="space-y-1">
+                  <label class="text-xs font-medium text-slate-500">Καύσιμο</label>
+                  ${sel('fuel', fuelOpts, d.fuel || '')}
+                </div>
+                <div class="space-y-1">
+                  <label class="text-xs font-medium text-slate-500">Χρώμα</label>
+                  ${inp('color', d.color)}
+                </div>
+              </div>
+              <div class="space-y-1">
+                <label class="text-xs font-medium text-slate-500">Κάτοχος (Όνομα Επώνυμο)</label>
+                ${inp('ownerName', d.ownerName)}
+              </div>
+              <div class="flex gap-2 pt-1">
+                <button type="submit" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 rounded-lg flex items-center justify-center gap-1.5">
+                  ${icon('check','w-4 h-4')} Αποθήκευση
+                </button>
+                <button type="button" id="cancel-edit" class="flex-1 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 font-medium py-2.5 rounded-lg">
+                  Άκυρο
+                </button>
+              </div>
+            </form>
+          </div>`;
+        refreshIcons();
+
+        $('#cancel-edit').addEventListener('click', renderResult);
+        $('#scan-edit-form').addEventListener('submit', (e) => {
+          e.preventDefault();
+          const fd = new FormData(e.target);
+          scanData = {
+            ...scanData,
+            plate:     (fd.get('plate') || '').toUpperCase().trim() || null,
+            vin:       (fd.get('vin') || '').toUpperCase().trim() || null,
+            brand:     fd.get('brand') || null,
+            model:     fd.get('model') || null,
+            year:      fd.get('year') ? parseInt(fd.get('year')) : null,
+            engine:    fd.get('engine') ? parseInt(fd.get('engine')) : null,
+            fuel:      fd.get('fuel') || null,
+            color:     fd.get('color') || null,
+            type:      fd.get('type') || 'car',
+            ownerName: fd.get('ownerName') || null,
+          };
+          renderResult();
+        });
+      }
+
+      renderResult();
     });
-  }
-
-  // =========================================================
-  //  PARTS SEARCH
-  // =========================================================
-  async function renderPartsSearch() {
-    const qs = new URLSearchParams(location.hash.split('?')[1] || '');
-    const vid = qs.get('vehicle');
-    let v = vid ? vehicleById(vid) : null;
-
-    const vehicleOptions = state.vehicles
-      .slice().sort((a, b) => (a.brand || '').localeCompare(b.brand || ''))
-      .map((vv) => `<option value="${vv.id}" ${v && v.id===vv.id?'selected':''}>${U.escape(vehicleLabel(vv))}</option>`).join('');
-
-    $('#view').innerHTML = `
-      ${pageHeader(t('parts_search_title'))}
-      <div class="max-w-3xl mx-auto p-4 pb-24 sm:pb-4 space-y-4">
-        <p class="text-sm text-slate-500 dark:text-slate-400">${t('parts_search_intro')}</p>
-
-        <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-3">
-          <div>
-            <label class="block text-sm font-medium mb-1">${t('vehicle')}</label>
-            <select id="ps-vehicle" class="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
-              <option value="">${t('select_customer').replace('πελάτη','όχημα').replace('customer','vehicle')}</option>
-              ${vehicleOptions}
-            </select>
-          </div>
-          <div>
-            <label class="block text-sm font-medium mb-1">${t('parts_search_text')}</label>
-            <input id="ps-text" type="text" placeholder="πχ. σετ φρένων, αμορτισέρ, λάδια..." class="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800" />
-          </div>
-        </div>
-
-        <div id="parts-links"></div>
-      </div>
-    `;
-
-    function renderLinks() {
-      const sel = $('#ps-vehicle').value;
-      const veh = sel ? vehicleById(sel) : (v || {});
-      const q = $('#ps-text').value;
-      const fullQuery = q || `${veh.brand || ''} ${veh.model || ''} ${veh.year || ''}`.trim();
-      const links = U.partsSearchLinks(veh || {}, fullQuery);
-      $('#parts-links').innerHTML = `
-        ${veh && veh.id ? `
-          <div class="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl p-3 mb-3 text-sm">
-            <div class="font-medium">${U.escape(vehicleLabel(veh))}</div>
-            ${veh.vin ? `<div class="text-xs text-slate-500 dark:text-slate-400">VIN: ${U.escape(veh.vin)}</div>` : ''}
-          </div>
-        ` : ''}
-        <div class="text-xs text-slate-500 dark:text-slate-400 mb-2">${t('parts_open_in')}</div>
-        <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
-          ${links.map((l) => `
-            <a target="_blank" rel="noopener" href="${l.url}" class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-orange-50 dark:hover:bg-orange-900/20 rounded-xl p-3 flex items-center gap-2">
-              <div class="w-8 h-8 rounded-lg bg-orange-100 dark:bg-orange-900/40 text-orange-600 dark:text-orange-300 flex items-center justify-center">${icon(l.icon, 'w-4 h-4')}</div>
-              <div class="text-sm font-medium truncate">${U.escape(l.name)}</div>
-            </a>
-          `).join('')}
-        </div>
-      `;
-      refreshIcons();
-    }
-    renderLinks();
-    $('#ps-vehicle').addEventListener('change', renderLinks);
-    $('#ps-text').addEventListener('input', U.debounce(renderLinks, 200));
   }
 
   // =========================================================
@@ -2034,7 +2312,7 @@
     $('#view').innerHTML = `
       ${pageHeader(t('job_orders'), {
         back: false,
-        actions: `<a href="#/job-orders/new" class="bg-orange-500 hover:bg-orange-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1">${icon('plus','w-4 h-4')} ${t('add')}</a>`
+        actions: `<a href="#/job-orders/new" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1">${icon('plus','w-4 h-4')} ${t('add')}</a>`
       })}
       <div class="max-w-3xl mx-auto p-4 pb-24 sm:pb-4 space-y-4">
         ${!pending.length && !completed.length ? emptyState('clipboard-check', t('no_job_orders'), t('new_job_order'), '#/job-orders/new') : ''}
@@ -2089,7 +2367,14 @@
 
     const qs = new URLSearchParams(location.hash.split('?')[1] || '');
     const prefVehicle = qs.get('vehicle');
+    const prefService = qs.get('service');
     if (!id && prefVehicle && !jo.vehicleId) jo.vehicleId = prefVehicle;
+
+    // Pre-populate tasks from linked service checklist
+    if (!id && prefService && !(jo.tasks && jo.tasks.length)) {
+      const linkedService = serviceById(prefService);
+      if (linkedService && linkedService.checklist) jo.tasks = [...linkedService.checklist];
+    }
 
     const vehicleOptions = state.vehicles
       .slice().sort((a, b) => (a.brand || '').localeCompare(b.brand || ''))
@@ -2107,14 +2392,14 @@
       <div class="max-w-2xl mx-auto p-4 pb-28 sm:pb-8 space-y-5">
 
         <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-3">
-          <h2 class="font-semibold flex items-center gap-2">${icon('car','w-4 h-4 text-orange-500')} ${t('vehicle')}</h2>
+          <h2 class="font-semibold flex items-center gap-2">${icon('car','w-4 h-4 text-blue-600')} ${t('vehicle')}</h2>
           <select id="jo-vehicle" class="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
             <option value="">— ${t('select_vehicle')} —</option>
             ${vehicleOptions}
           </select>
           <div class="flex gap-2">
             <a href="#/scan" class="flex-1 border border-purple-300 dark:border-purple-700 text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20 text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('scan-line','w-4 h-4')} ${t('qa_scan_doc')}</a>
-            <a href="#/vehicles/new" class="flex-1 border border-orange-300 dark:border-orange-700 text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20 text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('plus','w-4 h-4')} ${t('new_vehicle')}</a>
+            <a href="#/vehicles/new" class="flex-1 border border-blue-400 dark:border-blue-800 text-blue-700 dark:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('plus','w-4 h-4')} ${t('new_vehicle')}</a>
           </div>
         </div>
 
@@ -2139,7 +2424,7 @@
                 </div>
               `).join('')}
             </div>
-            <button type="button" id="add-custom-task" class="text-sm text-orange-600 dark:text-orange-400 hover:underline flex items-center gap-1">${icon('plus','w-3 h-3')} ${t('jo_add_custom')}</button>
+            <button type="button" id="add-custom-task" class="text-sm text-blue-700 dark:text-blue-500 hover:underline flex items-center gap-1">${icon('plus','w-3 h-3')} ${t('jo_add_custom')}</button>
           </div>
         </div>
 
@@ -2156,12 +2441,15 @@
         </div>
 
         <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4">
-          <h2 class="font-semibold flex items-center gap-2 mb-3">${icon('message-square','w-4 h-4 text-slate-500')} ${t('notes')} ${micBtn('jo-notes', { cls: 'ml-auto' })}</h2>
-          <textarea id="jo-notes" rows="2" placeholder="${t('jo_notes_placeholder')}" class="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm">${U.escape(jo.notes || '')}</textarea>
+          <h2 class="font-semibold flex items-center gap-2 mb-3">${icon('message-square','w-4 h-4 text-slate-500')} ${t('notes')}</h2>
+          <div class="flex gap-2 items-start">
+            <textarea id="jo-notes" rows="2" placeholder="${t('jo_notes_placeholder')}" data-vi="1" class="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm">${U.escape(jo.notes || '')}</textarea>
+            ${micBtn('jo-notes')}
+          </div>
         </div>
 
         <div class="flex gap-2">
-          <button id="save-jo" class="flex-1 bg-orange-500 hover:bg-orange-600 text-white font-medium py-2.5 rounded-lg">${t('save')}</button>
+          <button id="save-jo" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 rounded-lg">${t('save')}</button>
           <button type="button" onclick="history.back()" class="flex-1 bg-slate-200 dark:bg-slate-700 font-medium py-2.5 rounded-lg">${t('cancel')}</button>
         </div>
       </div>
@@ -2173,7 +2461,7 @@
       div.className = 'flex gap-2 mb-2 custom-task-row';
       const uid = `ct-${Date.now()}`;
       div.innerHTML = `
-        <input id="${uid}" type="text" class="custom-task-input flex-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm" value="${U.escape(value || '')}" placeholder="${t('task_custom_placeholder')}" />
+        <input id="${uid}" type="text" data-vi="1" class="custom-task-input flex-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm" value="${U.escape(value || '')}" placeholder="${t('task_custom_placeholder')}" />
         ${micBtn(uid)}
         <button type="button" class="remove-custom p-2 text-red-400 hover:text-red-600">${icon('x','w-4 h-4')}</button>
       `;
@@ -2257,10 +2545,10 @@
 
         <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4">
           <div class="grid grid-cols-2 gap-3 text-sm">
-            ${kv(t('vehicle'), v ? `<a class="text-orange-600 dark:text-orange-400" href="#/vehicles/${v.id}">${U.escape(vehicleLabel(v))}</a>` : '—', true)}
+            ${kv(t('vehicle'), v ? `<a class="text-blue-700 dark:text-blue-500" href="#/vehicles/${v.id}">${U.escape(vehicleLabel(v))}</a>` : '—', true)}
             ${kv(t('vehicle_plate'), v?.plate)}
-            ${kv(t('customer'), c ? `<a class="text-orange-600 dark:text-orange-400" href="#/customers/${c.id}">${U.escape(c.name)}</a>` : '—')}
-            ${kv(t('customer_phone'), c?.phone ? `<a href="tel:${U.escape(c.phone)}" class="text-orange-600 dark:text-orange-400">${U.escape(c.phone)}</a>` : '—')}
+            ${kv(t('customer'), c ? `<a class="text-blue-700 dark:text-blue-500" href="#/customers/${c.id}">${U.escape(c.name)}</a>` : '—')}
+            ${kv(t('customer_phone'), c?.phone ? `<a href="tel:${U.escape(c.phone)}" class="text-blue-700 dark:text-blue-500">${U.escape(c.phone)}</a>` : '—')}
           </div>
         </div>
 
@@ -2280,7 +2568,7 @@
             <span class="text-xs text-slate-500">${doneCount}/${taskCount}</span>
           </div>
           <div class="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-1.5 mb-3">
-            <div class="bg-orange-500 h-1.5 rounded-full" style="width:${progress}%"></div>
+            <div class="bg-blue-600 h-1.5 rounded-full" style="width:${progress}%"></div>
           </div>
           <div class="space-y-1.5">
             ${(jo.tasks || []).map((key) => `
@@ -2348,7 +2636,8 @@
     function buildHTML() {
       const taskCount = (jo.tasks || []).length;
       const doneCount = Object.values(jo.completedTasks || {}).filter(Boolean).length;
-      const allDone = taskCount > 0 && doneCount === taskCount;
+      const uncompletedCount = Object.keys(jo.uncompletedTasks || {}).length;
+      const allDone = taskCount > 0 && (doneCount + uncompletedCount) === taskCount;
       const progress = taskCount ? Math.round((doneCount / taskCount) * 100) : 0;
       return `
         ${pageHeader(t('jo_work_view'), { back: true })}
@@ -2373,16 +2662,14 @@
           </div>
 
           <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden" id="tasks-container">
-            ${(jo.tasks || []).map((key, idx) => `
-              <div class="border-b last:border-b-0 border-slate-100 dark:border-slate-700">
-                <div class="flex items-center gap-3 p-3">
-                  <input type="checkbox" id="cb-${idx}" data-key="${key}" ${jo.completedTasks?.[key] ? 'checked' : ''} class="task-cb w-5 h-5 rounded accent-emerald-500 flex-shrink-0 cursor-pointer" />
-                  <label for="cb-${idx}" class="flex-1 text-sm cursor-pointer ${jo.completedTasks?.[key] ? 'line-through text-slate-400' : ''}">${taskLabel(key)}</label>
-                  ${!key.startsWith('custom:') ? `<button class="parts-btn text-xs border border-purple-300 dark:border-purple-700 text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20 px-2 py-1 rounded-lg flex items-center gap-1 whitespace-nowrap" data-idx="${idx}" data-key="${key}" data-task="${U.escape(t('task_' + key))}">${icon('package','w-3 h-3')} ${t('parts_ai_btn')}</button>` : ''}
-                </div>
-                <div class="parts-panel hidden px-3 pb-3 pt-1" id="parts-panel-${idx}"></div>
+            ${(jo.tasks || []).map((key, idx) => `<div class="border-b last:border-b-0 border-slate-100 dark:border-slate-700">
+              <div class="flex items-center gap-3 p-3">
+                <input type="checkbox" id="cb-${idx}" data-key="${key}" ${jo.completedTasks?.[key] ? 'checked' : ''} class="task-cb w-5 h-5 rounded accent-emerald-500 flex-shrink-0 cursor-pointer" />
+                <label for="cb-${idx}" class="flex-1 text-sm cursor-pointer ${jo.completedTasks?.[key] ? 'line-through text-slate-400' : jo.uncompletedTasks?.[key] ? 'line-through text-red-400' : ''}">${taskLabel(key)}</label>
+                ${jo.uncompletedTasks?.[key] ? `<span class="text-xs text-red-400 font-medium">⚠ Δεν εκτελέστηκε</span>` : `<button class="unable-btn text-xs border border-red-200 dark:border-red-900 text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 px-2 py-1 rounded-lg flex-shrink-0 ${jo.completedTasks?.[key] ? 'hidden' : ''}" data-idx="${idx}" data-key="${key}">✕ Αδυναμία</button>`}
               </div>
-            `).join('')}
+              ${jo.uncompletedTasks?.[key] ? `<div class="px-3 pb-2 text-xs text-red-400 italic">${U.escape(jo.uncompletedTasks[key])}</div>` : `<div class="unable-note-area hidden px-3 pb-3 pt-0" id="unable-${idx}"><input type="text" placeholder="Αιτία αδυναμίας (προαιρετικό)…" class="unable-note-input w-full px-3 py-2 text-sm rounded-lg border border-red-200 dark:border-red-900 bg-white dark:bg-slate-800" data-key="${key}" /></div>`}
+            </div>`).join('')}
           </div>
 
           <button id="complete-jo" ${allDone ? '' : 'disabled'} class="${allDone ? 'bg-emerald-500 hover:bg-emerald-600 cursor-pointer text-white' : 'bg-slate-200 dark:bg-slate-700 cursor-not-allowed opacity-60 text-slate-500'} font-medium py-3 rounded-xl w-full flex items-center justify-center gap-2">
@@ -2396,8 +2683,9 @@
     function updateProgress() {
       const taskCount = (jo.tasks || []).length;
       const doneCount = Object.values(jo.completedTasks || {}).filter(Boolean).length;
-      const progress = taskCount ? Math.round((doneCount / taskCount) * 100) : 0;
-      const allDone = taskCount > 0 && doneCount === taskCount;
+      const uncompletedCount = Object.keys(jo.uncompletedTasks || {}).length;
+      const progress = taskCount ? Math.round(((doneCount + uncompletedCount) / taskCount) * 100) : 0;
+      const allDone = taskCount > 0 && (doneCount + uncompletedCount) === taskCount;
       const counter = $('#progress-counter');
       const bar = $('#progress-bar');
       const btn = $('#complete-jo');
@@ -2423,12 +2711,107 @@
       jo.status = 'completed';
       jo.completedAt = new Date().toISOString();
       await DB.add('job_orders', jo);
+      await loadAll();
+      jo = jobOrderById(id);
       U.toast(t('jo_completed_msg'));
-      if (confirm(t('jo_export_pdf_prompt'))) {
-        await loadAll();
-        jobOrderPdf(jobOrderById(id));
-      }
-      go('/job-orders/' + id);
+      showCompletionDialog(jo);
+    }
+
+    function showCompletionDialog(jo) {
+      const v = vehicleById(jo.vehicleId);
+      const c = v ? customerById(v.customerId) : null;
+      // Support both new contactMethods[] and legacy preferredContact string
+      const rawMethods = c?.contactMethods;
+      const methods = rawMethods
+        ? (Array.isArray(rawMethods) ? rawMethods : JSON.parse(rawMethods || '[]'))
+        : (c?.preferredContact ? [c.preferredContact] : ['whatsapp', 'viber', 'sms']);
+      const ws = state.settings;
+
+      const completedLabels = (jo.tasks || [])
+        .filter((k) => jo.completedTasks?.[k])
+        .map((k) => '✅ ' + (k.startsWith('custom:') ? k.slice(7) : t('task_' + k)))
+        .join('\n');
+
+      const phone = (c?.phone || '').replace(/\D/g, '');
+      const waPhone = phone.startsWith('0') ? '30' + phone.slice(1) : phone.startsWith('30') ? phone : '30' + phone;
+
+      const msg = [
+        `Αγαπητέ/ή ${c?.name || 'πελάτη'},`,
+        ``,
+        `Το όχημά σας ${[v?.brand, v?.model].filter(Boolean).join(' ')}${v?.plate ? ' (' + v.plate.toUpperCase() + ')' : ''} είναι έτοιμο για παραλαβή! 🔧`,
+        ``,
+        completedLabels ? `Εργασίες που εκτελέστηκαν:\n${completedLabels}` : '',
+        ``,
+        `Είμαστε στη διάθεσή σας για οποιαδήποτε απορία.`,
+        ``,
+        [ws.workshopName, ws.workshopPhone].filter(Boolean).join('\n'),
+      ].filter((l) => l !== undefined).join('\n').trim();
+
+      const encodedMsg = encodeURIComponent(msg);
+      const waLink = phone ? `https://wa.me/${waPhone}?text=${encodedMsg}` : `https://wa.me/?text=${encodedMsg}`;
+      const viberLink = phone ? `viber://chat?number=%2B${waPhone}&text=${encodedMsg}` : null;
+
+      const overlay = document.createElement('div');
+      overlay.className = 'fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-4';
+      overlay.innerHTML = `
+        <div class="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-md shadow-2xl p-5 space-y-4">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 flex items-center justify-center flex-shrink-0">
+              ${icon('check-circle','w-6 h-6')}
+            </div>
+            <div>
+              <div class="font-bold">Εργασίες ολοκληρώθηκαν!</div>
+              <div class="text-xs text-slate-500">Ενημερώστε τον πελάτη ή εκτυπώστε αναφορά</div>
+            </div>
+          </div>
+
+          <!-- Message preview -->
+          <div class="bg-slate-50 dark:bg-slate-800 rounded-xl p-3 border border-slate-200 dark:border-slate-700">
+            <div class="text-xs text-slate-400 mb-1.5 font-medium">Αυτοματοποιημένο μήνυμα</div>
+            <textarea id="completion-msg" rows="6" class="w-full text-sm bg-transparent resize-none focus:outline-none text-slate-700 dark:text-slate-200 leading-relaxed">${U.escape(msg)}</textarea>
+          </div>
+
+          <!-- Action buttons -->
+          ${(() => {
+            const contactButtons = {
+              whatsapp: `<a href="${waLink}" target="_blank" class="flex items-center justify-center gap-2 bg-green-500 hover:bg-green-600 text-white font-medium py-2.5 rounded-xl text-sm transition-colors">
+                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.123.555 4.116 1.529 5.843L0 24l6.306-1.505A11.945 11.945 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 22c-1.886 0-3.655-.493-5.193-1.357l-.371-.22-3.747.895.93-3.65-.24-.385A9.96 9.96 0 012 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10z"/></svg>
+                WhatsApp
+              </a>`,
+              viber: viberLink ? `<a href="${viberLink}" class="flex items-center justify-center gap-2 bg-violet-600 hover:bg-violet-700 text-white font-medium py-2.5 rounded-xl text-sm transition-colors">
+                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M11.4 0C5.2.4.6 5.2.6 11.4c0 2.2.6 4.3 1.8 6.1l-1.2 4.4 4.5-1.2c1.7 1 3.7 1.6 5.7 1.6 6.2 0 11-4.8 11.4-11C23 4.8 17.8-.4 11.4 0zm5.7 15.6c-.2.6-.9 1.1-1.6 1.2-.4.1-.9.1-1.4 0-2.7-.7-4.9-2.5-6.4-4.9-.8-1.3-1.3-2.7-1.4-4.2 0-.7.2-1.4.7-1.9.3-.3.6-.5.9-.5h.8c.3 0 .5.2.7.5l1 2.2c.1.3 0 .6-.2.8l-.6.7c-.1.2-.1.4 0 .6.5 1 1.3 1.9 2.3 2.5.2.1.4.1.6 0l.7-.7c.2-.2.5-.3.8-.2l2.2 1c.3.2.5.4.5.7v.8c0 .2-.1.3-.2.4h-.4z"/></svg>
+                Viber
+              </a>` : '',
+              sms: phone ? `<a href="sms:${c?.phone}&body=${encodedMsg}" class="flex items-center justify-center gap-2 bg-slate-600 hover:bg-slate-700 text-white font-medium py-2.5 rounded-xl text-sm transition-colors">
+                ${icon('message-circle','w-5 h-5')} SMS
+              </a>` : '',
+            };
+            const btns = methods.map((k) => contactButtons[k] || '').filter(Boolean);
+            const cols = btns.length === 1 ? 'grid-cols-1' : btns.length === 2 ? 'grid-cols-2' : 'grid-cols-3';
+            return `<div class="grid ${cols} gap-2">${btns.join('')}</div>`;
+          })()}
+          <div class="grid grid-cols-2 gap-2">
+            <button id="dlg-pdf" class="flex items-center justify-center gap-2 bg-red-500 hover:bg-red-600 text-white font-medium py-2.5 rounded-xl text-sm transition-colors">
+              ${icon('file-text','w-4 h-4')} PDF Αναφορά
+            </button>
+            <button id="dlg-close" class="flex items-center justify-center gap-2 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 font-medium py-2.5 rounded-xl text-sm transition-colors">
+              ${icon('x','w-4 h-4')} Κλείσιμο
+            </button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+      refreshIcons();
+
+      overlay.querySelector('#dlg-pdf').addEventListener('click', async () => {
+        overlay.remove();
+        await jobOrderPdf(jo);
+        go('/job-orders/' + id);
+      });
+      overlay.querySelector('#dlg-close').addEventListener('click', () => {
+        overlay.remove();
+        go('/job-orders/' + id);
+      });
     }
 
     $('#view').innerHTML = buildHTML();
@@ -2452,46 +2835,25 @@
       });
     });
 
-    // Parts AI buttons
-    $$('.parts-btn').forEach((btn) => {
+    // Unable buttons
+    $$('.unable-btn').forEach((btn) => {
       btn.addEventListener('click', async () => {
-        const idx = btn.dataset.idx;
-        const panel = $(`#parts-panel-${idx}`);
-        if (!panel) return;
-        if (!panel.classList.contains('hidden')) {
-          panel.classList.add('hidden');
-          return;
-        }
-        panel.classList.remove('hidden');
-        panel.innerHTML = `<div class="text-sm text-slate-400 flex items-center gap-2">${icon('loader','w-4 h-4 animate-spin')} ${t('parts_ai_searching')}</div>`;
-        refreshIcons();
-        try {
-          const result = await fetchPartsAI(v, btn.dataset.task);
-          panel.innerHTML = renderPartsAIResult(result, v);
-          panel.querySelectorAll('.price-search-btn').forEach((pbtn) => {
-            pbtn.addEventListener('click', async () => {
-              const targetId = pbtn.dataset.target;
-              const target = document.getElementById(targetId);
-              if (!target) return;
-              pbtn.disabled = true;
-              pbtn.innerHTML = `${icon('loader','w-3 h-3 animate-spin')} Αναζήτηση...`;
-              target.classList.remove('hidden');
-              target.innerHTML = `<div class="text-xs text-slate-400 flex items-center gap-1 py-1">${icon('loader','w-3 h-3 animate-spin')} Αναζήτηση τιμών...</div>`;
-              refreshIcons();
-              try {
-                const priceData = await fetchPartPrices(pbtn.dataset.query, pbtn.dataset.oem, pbtn.dataset.brandPn, v);
-                target.innerHTML = renderPriceResults(priceData, pbtn.dataset.query);
-              } catch (e) {
-                target.innerHTML = `<p class="text-xs text-red-500">Σφάλμα αναζήτησης τιμών</p>`;
-              }
-              pbtn.remove();
-              refreshIcons();
+        const area = $(`#unable-${btn.dataset.idx}`);
+        if (area) {
+          area.classList.toggle('hidden');
+          const inp = area.querySelector('.unable-note-input');
+          if (!area.classList.contains('hidden') && inp) {
+            inp.focus();
+            inp.addEventListener('change', async () => {
+              if (!jo.uncompletedTasks) jo.uncompletedTasks = {};
+              jo.uncompletedTasks[btn.dataset.key] = inp.value || '—';
+              jo = await DB.add('job_orders', jo);
+              state.jobOrders = await DB.getAll('job_orders');
+              jo = jobOrderById(id);
+              updateProgress();
             });
-          });
-        } catch (e) {
-          panel.innerHTML = `<p class="text-sm text-red-500">${t('parts_ai_error')}</p>`;
+          }
         }
-        refreshIcons();
       });
     });
 
@@ -2566,7 +2928,7 @@
             </div>
             <div class="flex flex-col items-end gap-1 flex-shrink-0">
               ${joStatusBadge(s.jo.status)}
-              ${s.c?.phone ? `<a href="tel:${U.escape(s.c.phone)}" onclick="event.stopPropagation()" class="text-xs bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300 px-2 py-0.5 rounded-full flex items-center gap-1">${icon('phone','w-3 h-3')} ${t('jo_call_customer')}</a>` : ''}
+              ${s.c?.phone ? `<a href="tel:${U.escape(s.c.phone)}" onclick="event.stopPropagation()" class="text-xs bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-400 px-2 py-0.5 rounded-full flex items-center gap-1">${icon('phone','w-3 h-3')} ${t('jo_call_customer')}</a>` : ''}
             </div>
           </div>
         </a>
@@ -2574,7 +2936,7 @@
     }
 
     $('#view').innerHTML = `
-      ${pageHeader(t('schedule_title'), { back: false, actions: `<a href="#/job-orders/new" class="bg-orange-500 hover:bg-orange-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1">${icon('plus','w-4 h-4')} ${t('add')}</a>` })}
+      ${pageHeader(t('schedule_title'), { back: false, actions: `<a href="#/job-orders/new" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1">${icon('plus','w-4 h-4')} ${t('add')}</a>` })}
       <div class="max-w-3xl mx-auto p-4 pb-24 sm:pb-4 space-y-4">
 
         ${!active.length ? emptyState('calendar-clock', t('schedule_no_orders'), t('new_job_order'), '#/job-orders/new') : ''}
@@ -2710,7 +3072,7 @@
     }
 
     const cheapest = results[0];
-    const colorMap = { orange: 'text-orange-600 dark:text-orange-400', blue: 'text-blue-600 dark:text-blue-400', green: 'text-green-600 dark:text-green-400' };
+    const colorMap = { orange: 'text-blue-700 dark:text-blue-500', blue: 'text-blue-600 dark:text-blue-400', green: 'text-green-600 dark:text-green-400' };
 
     return `
       <div class="mt-2 space-y-1.5">
@@ -2781,10 +3143,16 @@
 
     const taskRows = (jo.tasks || []).map((key) => {
       const done = jo.completedTasks?.[key];
+      const unable = jo.uncompletedTasks?.[key];
       const label = key.startsWith('custom:') ? key.slice(7) : t('task_' + key);
-      return `<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-bottom:1px solid #f1f5f9;">
-        <span style="font-size:15px;color:${done ? '#10b981' : '#cbd5e1'};flex-shrink:0;">${done ? '✓' : '○'}</span>
-        <span style="font-size:11.5px;">${U.escape(label)}</span>
+      const statusIcon = done ? '✓' : unable ? '⚠' : '○';
+      const statusColor = done ? '#10b981' : unable ? '#ef4444' : '#cbd5e1';
+      return `<div style="display:flex;align-items:flex-start;gap:8px;padding:5px 8px;border-bottom:1px solid #f1f5f9;">
+        <span style="font-size:15px;color:${statusColor};flex-shrink:0;">${statusIcon}</span>
+        <div style="font-size:11.5px;">
+          <div${unable ? ' style="color:#ef4444;"' : ''}>${U.escape(label)}</div>
+          ${unable ? `<div style="font-size:10px;color:#ef4444;font-style:italic;">Δεν εκτελέστηκε${unable !== '—' ? ': ' + U.escape(unable) : ''}</div>` : ''}
+        </div>
       </div>`;
     }).join('');
 
@@ -2796,7 +3164,7 @@
       : 'background:#fef3c7;color:#92400e';
 
     const html = `
-      <div style="font-family:Arial,Helvetica,sans-serif;color:#1e293b;background:white;width:794px;padding:36px 40px 36px 40px;box-sizing:border-box;">
+      <div style="font-family:'Segoe UI',Arial,Helvetica,'DejaVu Sans',sans-serif;color:#1e293b;background:white;width:794px;padding:36px 40px 36px 40px;box-sizing:border-box;">
 
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;">
           <div>
@@ -2959,22 +3327,10 @@
         </div>
 
         <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-3">
-          <h2 class="font-semibold">${t('ai_settings')}</h2>
-          <div class="flex items-center gap-3 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-900/40 rounded-lg p-3">
-            ${icon('sparkles','w-5 h-5 text-purple-600 dark:text-purple-400 flex-shrink-0')}
-            <div>
-              <div class="text-sm font-medium">Claude AI (Anthropic)</div>
-              <div class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">claude-haiku-4-5 · Ενεργό · Ασφαλές</div>
-            </div>
-            <span class="ml-auto text-xs bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded-full font-medium">ON</span>
-          </div>
-        </div>
-
-        <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-3">
           <h2 class="font-semibold">${t('data_management')}</h2>
           <div class="grid grid-cols-2 gap-2">
             <button id="export-data" class="bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium px-3 py-2.5 rounded-lg flex items-center justify-center gap-1">${icon('download','w-4 h-4')} ${t('export_backup')}</button>
-            <label class="bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium px-3 py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer">
+            <label class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer">
               ${icon('upload','w-4 h-4')} ${t('import_backup')}
               <input type="file" id="import-data" accept="application/json" class="hidden" />
             </label>
@@ -2982,7 +3338,7 @@
           <button id="reset-data" class="w-full bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-300 border border-red-200 dark:border-red-900/50 hover:bg-red-100 dark:hover:bg-red-900/30 text-sm font-medium px-3 py-2.5 rounded-lg flex items-center justify-center gap-1">${icon('trash-2','w-4 h-4')} ${t('reset_data')}</button>
         </div>
 
-        <button id="save-settings" class="w-full bg-orange-500 hover:bg-orange-600 text-white font-medium py-2.5 rounded-lg">${t('save')}</button>
+        <button id="save-settings" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 rounded-lg">${t('save')}</button>
       </div>
     `;
 
@@ -3052,7 +3408,7 @@
       <div>
         <label class="block text-sm font-medium mb-1">${U.escape(label)}${opts.required?' <span class="text-red-500">*</span>':''}</label>
         <div class="${mic ? 'flex gap-2' : ''}">
-          <input id="${fieldId}" type="${opts.type||'text'}" name="${name}" value="${U.escape(value==null?'':value)}" ${opts.required?'required':''} ${opts.step?`step="${opts.step}"`:''} placeholder="${U.escape(opts.placeholder||'')}" class="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-500" />
+          <input id="${fieldId}" type="${opts.type||'text'}" name="${name}" value="${U.escape(value==null?'':value)}" ${mic?'data-vi="1"':''} ${opts.required?'required':''} ${opts.step?`step="${opts.step}"`:''} placeholder="${U.escape(opts.placeholder||'')}" class="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500" />
           ${mic}
         </div>
       </div>
@@ -3062,11 +3418,14 @@
   function formTextArea(name, label, value, opts) {
     opts = opts || {};
     const fieldId = opts.id || `ta-${name}`;
-    const mic = opts.voice !== false ? micBtn(fieldId, { cls: 'ml-auto' }) : '';
+    const mic = opts.voice !== false ? micBtn(fieldId) : '';
     return `
       <div>
-        <label class="block text-sm font-medium mb-1 flex items-center gap-1">${U.escape(label)} ${mic}</label>
-        <textarea id="${fieldId}" name="${name}" rows="${opts.rows||2}" class="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-500">${U.escape(value==null?'':value)}</textarea>
+        <label class="block text-sm font-medium mb-1">${U.escape(label)}</label>
+        <div class="${mic ? 'flex gap-2 items-start' : ''}">
+          <textarea id="${fieldId}" name="${name}" rows="${opts.rows||2}" data-vi="1" class="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500">${U.escape(value==null?'':value)}</textarea>
+          ${mic}
+        </div>
       </div>
     `;
   }

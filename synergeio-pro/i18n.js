@@ -66,7 +66,7 @@ window.I18N = {
     // Plate search
     plate_search_title: 'Αναζήτηση οχήματος',
     plate_search_subtitle: 'Πληκτρολόγησε, πες ή φωτογράφισε την πινακίδα',
-    plate_search_placeholder: 'Πινακίδα — πχ. ΑΒΓ-1234',
+    plate_search_placeholder: 'ΑΡΙΘΜΟΣ ΚΥΚΛΟΦΟΡΙΑΣ',
     plate_photo_btn: 'Φωτογραφία',
     plate_search_btn: 'Αναζήτηση',
     plate_reading: 'Ανάγνωση πινακίδας…',
@@ -78,7 +78,7 @@ window.I18N = {
     plate_new_vehicle: 'Νέο Όχημα + Πελάτης',
     plate_active_orders: 'ενεργές εντολές',
     customer_search_placeholder: 'Αναζήτηση πελάτη...',
-    voice_tap_hint: 'Πάτα και μίλα',
+    voice_tap_hint: 'Κράτα πατημένο και μίλα',
 
     // Customers
     customers: 'Πελάτες',
@@ -149,7 +149,7 @@ window.I18N = {
     part_price: 'Τιμή',
     service_labor: 'Ώρες εργασίας',
     service_labor_rate: 'Τιμή/ώρα',
-    service_mileage: 'Χιλιόμετρα τότε',
+    service_mileage: 'Χιλιόμετρα',
     service_total: 'Σύνολο',
     service_mechanic: 'Μηχανικός',
     service_photos: 'Φωτογραφίες πριν/μετά',
@@ -407,7 +407,7 @@ window.I18N = {
     plate_new_vehicle: 'New Vehicle + Customer',
     plate_active_orders: 'active orders',
     customer_search_placeholder: 'Search customer...',
-    voice_tap_hint: 'Tap and speak',
+    voice_tap_hint: 'Hold and speak',
 
     customers: 'Customers',
     customer: 'Customer',
