@@ -499,11 +499,26 @@
       result.innerHTML = `<div class="text-center text-slate-400 text-sm py-2 flex items-center justify-center gap-2">${icon('loader','w-4 h-4 animate-spin')} ${t('plate_reading')}</div>`;
       refreshIcons();
       try {
+        // Resize to max 900px and compress to reduce upload time
         const dataUrl = await new Promise((res, rej) => {
-          const r = new FileReader();
-          r.onload = () => res(r.result);
-          r.onerror = rej;
-          r.readAsDataURL(file);
+          const img = new Image();
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            img.onload = () => {
+              const MAX = 900;
+              const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+              const w = Math.round(img.width * scale);
+              const h = Math.round(img.height * scale);
+              const canvas = document.createElement('canvas');
+              canvas.width = w; canvas.height = h;
+              canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+              res(canvas.toDataURL('image/jpeg', 0.75));
+            };
+            img.onerror = rej;
+            img.src = e.target.result;
+          };
+          reader.onerror = rej;
+          reader.readAsDataURL(file);
         });
         const resp = await fetch('/api/plate-ocr', {
           method: 'POST',
@@ -740,11 +755,11 @@
               ${micBtn('cf-phone')}
             </div>
           </div>
-          ${formField('email', t('customer_email'), c.email, { type: 'email' })}
-          ${formField('address', t('customer_address'), c.address)}
+          ${formField('email', t('customer_email'), c.email, { type: 'email', voice: true })}
+          ${formField('address', t('customer_address'), c.address, { voice: true })}
           <div class="grid grid-cols-2 gap-3">
-            ${formField('company', t('customer_company'), c.company)}
-            ${formField('taxId', t('customer_tax_id'), c.taxId)}
+            ${formField('company', t('customer_company'), c.company, { voice: true })}
+            ${formField('taxId', t('customer_tax_id'), c.taxId, { voice: true })}
           </div>
           ${formTextArea('notes', t('notes'), c.notes)}
           <!-- Contact methods (multi-select) -->
