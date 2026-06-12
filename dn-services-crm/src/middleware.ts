@@ -30,11 +30,12 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  const { data: { user } } = await withTimeout(
-    supabase.auth.getUser(),
-    5000,
-    { data: { user: null }, error: null } as any,
-  )
+  // Use getSession() (local JWT validation — no network call to Supabase auth server).
+  // getUser() makes a network round-trip on every page load and causes 307 redirects
+  // whenever Supabase auth is slow (observed 1-7s spikes). getSession() is safe for
+  // routing decisions; actual data APIs still validate via RLS with the user's JWT.
+  const { data: { session } } = await supabase.auth.getSession()
+  const user = session?.user ?? null
 
   const path = request.nextUrl.pathname
   const isLoginPage = path === '/login'
@@ -48,7 +49,8 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL('/', request.url))
   }
 
-  // For all authenticated, non-login pages: fetch profile once for all checks
+  // For all authenticated, non-login pages: fetch profile once for all checks.
+  // 4-second timeout so a slow DB doesn't block the page.
   if (user && !isSuspendedPage) {
     const profileResult = await withTimeout(
       supabase.from('profiles').select('role, suspended').eq('id', user.id).single(),
