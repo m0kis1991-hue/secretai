@@ -4,6 +4,12 @@ import { NextResponse, type NextRequest } from 'next/server'
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request })
 
+  const path = request.nextUrl.pathname
+
+  if (path === '/dial') {
+    return NextResponse.redirect(new URL('/', request.url))
+  }
+
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -21,22 +27,28 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  // Local JWT read — zero network calls. Pages enforce their own role checks.
-  const { data: { session } } = await supabase.auth.getSession()
-  const isAuthenticated = !!session?.user
-
-  const path = request.nextUrl.pathname
-
-  // Removed feature: always redirect away from /dial
-  if (path === '/dial') {
-    return NextResponse.redirect(new URL('/', request.url))
+  // getUser() validates the JWT server-side. If Supabase is slow we fail-open
+  // (let the request through) rather than false-redirecting everyone to /login.
+  // Data is still protected by RLS regardless of what the middleware decides.
+  let user: { id: string } | null = null
+  try {
+    const result = await Promise.race<ReturnType<typeof supabase.auth.getUser> | never>([
+      supabase.auth.getUser(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('auth_timeout')), 5000)
+      ),
+    ])
+    user = (result as Awaited<ReturnType<typeof supabase.auth.getUser>>).data.user
+  } catch {
+    // Supabase auth timeout or error → fail open: pass request through.
+    return response
   }
 
-  if (!isAuthenticated && path !== '/login') {
+  if (!user && path !== '/login') {
     return NextResponse.redirect(new URL('/login', request.url))
   }
 
-  if (isAuthenticated && path === '/login') {
+  if (user && path === '/login') {
     return NextResponse.redirect(new URL('/', request.url))
   }
 
