@@ -1047,7 +1047,8 @@ export default function ContactsPage() {
   }
 
   // ── Filter chips ───────────────────────────────────────────────────────────
-  const FILTERS: { key: FilterKey; labelEl: string; labelEn: string; badge?: number }[] = topLeadsAccess ? [
+  // Trophy filter chips — used by trophy telephonists AND by admin when in trophy scope
+  const TROPHY_FILTERS: { key: FilterKey; labelEl: string; labelEn: string; badge?: number }[] = [
     { key: 'all',           labelEl: 'Όλες',                 labelEn: 'All' },
     { key: 'today',         labelEl: 'Ακολούθηση σήμερα',    labelEn: "Today's Follow-ups", badge: todayCount },
     { key: 'new',           labelEl: 'Νέοι',                 labelEn: 'New' },
@@ -1059,19 +1060,21 @@ export default function ContactsPage() {
     { key: 'no_answer',     labelEl: 'Δεν Απάντησε',         labelEn: 'No Answer' },
     { key: 'not_buying',    labelEl: 'Όχι',                  labelEn: 'Declined' },
     { key: 'bought',        labelEl: 'Αγόρασαν',             labelEn: 'Bought' },
-  ] : [
-    { key: 'all',            labelEl: 'Όλες',                 labelEn: 'All' },
-    { key: 'today',          labelEl: 'Ακολούθηση σήμερα',    labelEn: "Today's Follow-ups", badge: todayCount },
-    { key: 'high',           labelEl: 'Υψηλή Προτεραιότητα', labelEn: 'High Priority' },
-    { key: 'new',            labelEl: 'Νέοι',                 labelEn: 'New' },
-    { key: 'canva',          labelEl: 'Canva',                labelEn: 'Canva' },
-    { key: 'probable',       labelEl: 'Πιθανός',              labelEn: 'Probable' },
-    { key: 'likely_sale',    labelEl: 'Sale',                 labelEn: 'Sale' },
-    { key: 'likely_antisale',labelEl: 'Antisale',             labelEn: 'Antisale' },
-    { key: 'no_answer',      labelEl: 'Δεν Απάντησε',         labelEn: 'No Answer' },
-    { key: 'not_buying',     labelEl: 'Δεν Αγοράζει',         labelEn: 'Not Buying' },
-    { key: 'bought',         labelEl: 'Αγόρασαν',             labelEn: 'Bought' },
   ]
+  const FILTERS: { key: FilterKey; labelEl: string; labelEn: string; badge?: number }[] =
+    (topLeadsAccess || (isAdmin && ownerScope === 'trophy')) ? TROPHY_FILTERS : [
+      { key: 'all',            labelEl: 'Όλες',                 labelEn: 'All' },
+      { key: 'today',          labelEl: 'Ακολούθηση σήμερα',    labelEn: "Today's Follow-ups", badge: todayCount },
+      { key: 'high',           labelEl: 'Υψηλή Προτεραιότητα', labelEn: 'High Priority' },
+      { key: 'new',            labelEl: 'Νέοι',                 labelEn: 'New' },
+      { key: 'canva',          labelEl: 'Canva',                labelEn: 'Canva' },
+      { key: 'probable',       labelEl: 'Πιθανός',              labelEn: 'Probable' },
+      { key: 'likely_sale',    labelEl: 'Sale',                 labelEn: 'Sale' },
+      { key: 'likely_antisale',labelEl: 'Antisale',             labelEn: 'Antisale' },
+      { key: 'no_answer',      labelEl: 'Δεν Απάντησε',         labelEn: 'No Answer' },
+      { key: 'not_buying',     labelEl: 'Δεν Αγοράζει',         labelEn: 'Not Buying' },
+      { key: 'bought',         labelEl: 'Αγόρασαν',             labelEn: 'Bought' },
+    ]
 
   return (
     <SidebarProvider>
@@ -1167,7 +1170,7 @@ export default function ContactsPage() {
                 ] as const).map(s => (
                   <button
                     key={s.key}
-                    onClick={() => setOwnerScope(s.key)}
+                    onClick={() => { setOwnerScope(s.key); setActiveFilter('all'); sessionStorage.setItem('contacts-scope', s.key) }}
                     className={cn(
                       "flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all",
                       ownerScope === s.key
