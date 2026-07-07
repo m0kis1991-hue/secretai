@@ -187,7 +187,7 @@ const PAGE_SIZE = 10
 
 const todayISO = () => new Date().toISOString().slice(0, 10)
 
-type FilterKey = 'all' | 'today' | 'high' | 'new' | 'canva' | 'probable' | 'likely_sale' | 'likely_antisale' | 'another_time' | 'no_answer' | 'not_buying' | 'bought' | 'few_reviews'
+type FilterKey = 'all' | 'today' | 'high' | 'new' | 'canva' | 'probable' | 'likely_sale' | 'likely_antisale' | 'another_time' | 'email' | 'no_answer' | 'not_buying' | 'bought' | 'few_reviews'
 
 const STATUS_COLS: { key: LeadStatus; labelEl: string; labelEn: string; color: string }[] = [
   { key: STATUS.NEW,             labelEl: 'Νέο',           labelEn: 'New',       color: 'border-t-blue-400' },
@@ -237,7 +237,7 @@ export default function ContactsPage() {
   const pageJumpRef = useRef<HTMLInputElement>(null)
   const [activeFilter, setActiveFilter] = useState<FilterKey>(() => {
     try {
-      const VALID: FilterKey[] = ['all','today','high','new','canva','probable','likely_sale','likely_antisale','another_time','no_answer','not_buying','bought','few_reviews']
+      const VALID: FilterKey[] = ['all','today','high','new','canva','probable','likely_sale','likely_antisale','another_time','email','no_answer','not_buying','bought','few_reviews']
       const stored = sessionStorage.getItem('contacts-filter') as FilterKey
       return VALID.includes(stored) ? stored : 'all'
     } catch { return 'all' }
@@ -357,6 +357,7 @@ export default function ContactsPage() {
           else if (p.activeFilter === 'likely_sale') q = q.eq('status', 'likely_sale')
           else if (p.activeFilter === 'likely_antisale') q = q.eq('status', 'likely_antisale')
           else if (p.activeFilter === 'another_time') q = q.eq('status', 'another_time')
+          else if (p.activeFilter === 'email') q = q.eq('status', 'email')
           else if (p.activeFilter === 'no_answer') q = q.eq('status', 'no_answer')
           else if (p.activeFilter === 'not_buying') q = q.eq('status', 'not_buying')
           else if (p.activeFilter === 'bought') q = q.eq('status', 'bought')
@@ -716,6 +717,7 @@ export default function ContactsPage() {
       case 'likely_sale':     return topLeadsAccess ? (st === 'likely_sale' || st === 'likely_antisale') : st === 'likely_sale'
       case 'likely_antisale': return st === 'likely_antisale'
       case 'another_time':    return st === 'another_time'
+      case 'email':           return st === 'email'
       case 'no_answer':       return st === 'no_answer'
       case 'not_buying':      return st === 'not_buying'
       case 'bought':          return st === 'bought'
@@ -817,6 +819,7 @@ export default function ContactsPage() {
       case 'likely_sale':     return <Badge className="bg-amber-500 text-white text-[10px]">Sale</Badge>
       case 'likely_antisale': return <Badge className="bg-amber-800 text-white text-[10px]">Antisale</Badge>
       case 'another_time':    return <Badge className="bg-indigo-500 text-white text-[10px]">{lang === 'el' ? 'Άλλη Στιγμή' : 'Another Time'}</Badge>
+      case 'email':           return <Badge className="bg-cyan-600 text-white text-[10px]">Email</Badge>
       case 'few_reviews':     return <Badge className="bg-sky-500 text-white text-[10px]">Λίγες Αξιολ.</Badge>
       case 'no_answer':       return <Badge className="bg-orange-500 hover:bg-orange-600 text-white text-[10px]">{lang === 'el' ? 'Δεν Απάντησε' : 'No Answer'}</Badge>
       case 'not_buying':      return <Badge variant="destructive" className="text-[10px]">{lang === 'el' ? 'Όχι' : 'No'}</Badge>
@@ -1051,6 +1054,7 @@ export default function ContactsPage() {
     { key: 'canva',         labelEl: 'Canva',                labelEn: 'Canva' },
     { key: 'probable',      labelEl: 'Πιθανός',              labelEn: 'Probable' },
     { key: 'another_time',  labelEl: 'Άλλη Στιγμή',          labelEn: 'Another Time' },
+    { key: 'email',         labelEl: 'Email',                labelEn: 'Email' },
     { key: 'few_reviews',   labelEl: 'Λίγες Αξιολογήσεις',  labelEn: 'Few Reviews' },
     { key: 'no_answer',     labelEl: 'Δεν Απάντησε',         labelEn: 'No Answer' },
     { key: 'not_buying',    labelEl: 'Όχι',                  labelEn: 'Declined' },
