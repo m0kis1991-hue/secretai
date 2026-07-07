@@ -7,11 +7,13 @@ const PublicLeadSchema = z.object({
   phone: z.string(),
   phones: z.array(z.string()).optional(),
   email: z.string().optional(),
+  address: z.string().optional(),
   industry: z.string(),
   profile: z.string(),
   source: z.string(),
   rating: z.number().optional(),
   reviewCount: z.number().optional(),
+  mapsUrl: z.string().optional(),
 });
 
 export type FindPublicLeadsInput = {
@@ -157,9 +159,11 @@ async function searchOverpass(category: string, location: string): Promise<Publi
       if (!name || !rawPhone) continue;
       const phone = cleanPhone(rawPhone);
       if (!isValidPhone(phone)) continue;
+      const addrParts = [t['addr:housenumber'], t['addr:street'], t['addr:city']].filter(Boolean)
       leads.push({
         name, phone,
         email: t.email || t['contact:email'] || undefined,
+        address: addrParts.length > 0 ? addrParts.join(' ') : undefined,
         industry: t.amenity || t.office || t.healthcare || t.shop || category,
         profile: t.description?.slice(0, 80) || t['name:en'] || t.amenity || t.office || category,
         source: 'OpenStreetMap',
@@ -190,7 +194,7 @@ async function searchGooglePlaces(category: string, location: string): Promise<P
       headers: {
         'Content-Type': 'application/json',
         'X-Goog-Api-Key': apiKey,
-        'X-Goog-FieldMask': 'places.displayName,places.internationalPhoneNumber,places.nationalPhoneNumber,places.primaryTypeDisplayName,places.websiteUri,places.googleMapsUri,places.rating,places.userRatingCount',
+        'X-Goog-FieldMask': 'places.displayName,places.internationalPhoneNumber,places.nationalPhoneNumber,places.primaryTypeDisplayName,places.formattedAddress,places.websiteUri,places.googleMapsUri,places.rating,places.userRatingCount',
       },
       body: JSON.stringify({
         textQuery: `${category} ${location} Ελλάδα`,
@@ -215,11 +219,13 @@ async function searchGooglePlaces(category: string, location: string): Promise<P
         name: p.displayName?.text ?? '',
         phone: cleanPhone(p.internationalPhoneNumber || p.nationalPhoneNumber),
         email: undefined,
+        address: p.formattedAddress || undefined,
         industry: p.primaryTypeDisplayName?.text ?? category,
         profile: p.primaryTypeDisplayName?.text ?? category,
         source: 'Google Maps',
         rating: typeof p.rating === 'number' ? p.rating : undefined,
         reviewCount: typeof p.userRatingCount === 'number' ? p.userRatingCount : undefined,
+        mapsUrl: p.googleMapsUri || undefined,
       }))
       .filter((l: PublicLead) => isValidPhone(l.phone));
   } catch (e) {
@@ -1749,19 +1755,31 @@ export async function findPublicLeads(input: FindPublicLeadsInput): Promise<Find
     const leadKeys = leadPhoneList.map(p => p.replace(/\D/g, '').slice(-10));
     const existingIdx = leadKeys.reduce<number | undefined>((found, k) => found ?? seenPhone.get(k), undefined);
     if (existingIdx !== undefined) {
-      // Duplicate — merge all unique phones, and use the entry with MORE phones as the base
-      // (so a directory source with mobile+landline beats a single-phone API source)
+      // Duplicate — merge phones and pick the best source as base.
+      // Priority: rated source (Google Maps/Yelp/Foursquare) > more phones > existing.
       const existing = all[existingIdx];
       const existingPhoneList = existing.phones ?? [existing.phone];
       const mergedKeys = new Map<string, string>();
       for (const p of existingPhoneList) mergedKeys.set(p.replace(/\D/g, '').slice(-10), p);
       for (const p of leadPhoneList) mergedKeys.set(p.replace(/\D/g, '').slice(-10), p);
       const mergedPhones = [...mergedKeys.values()];
-      const baseEntry = leadPhoneList.length > existingPhoneList.length ? lead : existing;
+      const existingHasRating = existing.rating != null;
+      const newHasRating = lead.rating != null;
+      const baseEntry =
+        existingHasRating && !newHasRating ? existing :
+        !existingHasRating && newHasRating ? lead :
+        leadPhoneList.length > existingPhoneList.length ? lead : existing;
+      // Always preserve the best rating available from either source
+      const bestRating = existing.rating != null && (lead.rating == null || existing.rating >= lead.rating)
+        ? existing.rating : lead.rating ?? existing.rating;
+      const bestReviewCount = (existing.reviewCount ?? 0) >= (lead.reviewCount ?? 0)
+        ? existing.reviewCount : lead.reviewCount;
       all[existingIdx] = {
         ...baseEntry,
         phone: mergedPhones[0],
         phones: mergedPhones.length > 1 ? mergedPhones : undefined,
+        rating: bestRating,
+        reviewCount: bestReviewCount,
       };
       for (const k of mergedKeys.keys()) seenPhone.set(k, existingIdx);
     } else {

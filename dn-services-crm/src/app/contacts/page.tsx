@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import {
   Search, Plus, Upload, ChevronLeft, ChevronRight,
-  Download, LayoutList, Columns3, Phone, Calendar, Lock, RefreshCcw, Bell, ExternalLink, Send, Filter, X, Layers, Trash2, CheckSquare, Square,
+  Download, LayoutList, Columns3, Phone, Calendar, Lock, RefreshCcw, Bell, ExternalLink, Send, Filter, X, Layers, Trash2, CheckSquare, Star, Crown, Users,
 } from "lucide-react"
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useRouter } from "next/navigation"
@@ -110,11 +110,13 @@ function PhoneCallButton({
   const phones = sortMobileFirst(parsePhonesField(phone))
   const [pickerOpen, setPickerOpen] = useState(false)
 
-  const logAndCall = async (p: string) => {
+  const logAndCall = (p: string) => {
+    // Fire tel: immediately — mobile browsers block tel: navigation after any await (user gesture expires)
+    window.location.href = `tel:${p}`
     if (callerId) {
       const supabase = createClient()
       const today = new Date().toISOString().slice(0, 10)
-      await Promise.all([
+      Promise.all([
         supabase.from('call_logs').insert({
           telephonist_id: callerId,
           telephonist_name: callerName ?? '',
@@ -123,9 +125,8 @@ function PhoneCallButton({
           called_at: new Date().toISOString(),
         }),
         supabase.from('contacts').update({ last_contacted: today }).eq('id', contactId),
-      ])
+      ]).catch(() => {})
     }
-    window.location.href = `tel:${p}`
   }
 
   if (phones.length <= 1) {
@@ -186,7 +187,7 @@ const PAGE_SIZE = 10
 
 const todayISO = () => new Date().toISOString().slice(0, 10)
 
-type FilterKey = 'all' | 'today' | 'high' | 'new' | 'likely' | 'bought'
+type FilterKey = 'all' | 'today' | 'high' | 'new' | 'canva' | 'probable' | 'likely_sale' | 'likely_antisale' | 'another_time' | 'no_answer' | 'not_buying' | 'bought' | 'few_reviews'
 
 const STATUS_COLS: { key: LeadStatus; labelEl: string; labelEn: string; color: string }[] = [
   { key: STATUS.NEW,             labelEl: 'Νέο',           labelEn: 'New',       color: 'border-t-blue-400' },
@@ -196,6 +197,17 @@ const STATUS_COLS: { key: LeadStatus; labelEl: string; labelEn: string; color: s
   { key: STATUS.NO_ANSWER,       labelEl: 'Δεν Απάντησε', labelEn: 'No Answer', color: 'border-t-orange-400' },
   { key: STATUS.NOT_BUYING,      labelEl: 'Όχι',           labelEn: 'Declined',  color: 'border-t-red-400' },
   { key: STATUS.BOUGHT,          labelEl: 'Αγόρασε',       labelEn: 'Bought',    color: 'border-t-green-500' },
+]
+
+const TROPHY_STATUS_COLS: { key: LeadStatus; labelEl: string; labelEn: string; color: string }[] = [
+  { key: STATUS.NEW,         labelEl: 'Νέο',                  labelEn: 'New',         color: 'border-t-blue-400' },
+  { key: STATUS.CANVA,       labelEl: 'Canva',                labelEn: 'Canva',       color: 'border-t-purple-500' },
+  { key: STATUS.PROBABLE,    labelEl: 'Πιθανός',              labelEn: 'Probable',    color: 'border-t-teal-500' },
+  { key: STATUS.LIKELY_SALE, labelEl: 'Sale',                 labelEn: 'Sale',        color: 'border-t-amber-500' },
+  { key: STATUS.FEW_REVIEWS, labelEl: 'Λίγες Αξιολογήσεις',  labelEn: 'Few Reviews', color: 'border-t-sky-400' },
+  { key: STATUS.NO_ANSWER,   labelEl: 'Δεν Απάντησε',        labelEn: 'No Answer',   color: 'border-t-orange-400' },
+  { key: STATUS.NOT_BUYING,  labelEl: 'Όχι',                  labelEn: 'Declined',    color: 'border-t-red-400' },
+  { key: STATUS.BOUGHT,      labelEl: 'Αγόρασε',              labelEn: 'Bought',      color: 'border-t-green-500' },
 ]
 
 const emptyForm = (): Partial<Contact> => ({
@@ -217,12 +229,22 @@ export default function ContactsPage() {
   const [newLeadAssignTo, setNewLeadAssignTo] = useState<string>('self')
   const [newLeadSource, setNewLeadSource] = useState('')
   const [lang, setLang] = useState<'el' | 'en'>('el')
-  const [page, setPage] = useState(1)
+  const [page, setPage] = useState<number>(() => {
+    try { return parseInt(sessionStorage.getItem('contacts-page') ?? '1', 10) || 1 } catch { return 1 }
+  })
   const [pageJumpActive, setPageJumpActive] = useState(false)
   const [pageJumpValue, setPageJumpValue] = useState('')
   const pageJumpRef = useRef<HTMLInputElement>(null)
-  const [activeFilter, setActiveFilter] = useState<FilterKey>('all')
-  const [categoryFilter, setCategoryFilter] = useState<string>('all')
+  const [activeFilter, setActiveFilter] = useState<FilterKey>(() => {
+    try {
+      const VALID: FilterKey[] = ['all','today','high','new','canva','probable','likely_sale','likely_antisale','another_time','no_answer','not_buying','bought','few_reviews']
+      const stored = sessionStorage.getItem('contacts-filter') as FilterKey
+      return VALID.includes(stored) ? stored : 'all'
+    } catch { return 'all' }
+  })
+  const [categoryFilter, setCategoryFilter] = useState<string>(() => {
+    try { return sessionStorage.getItem('contacts-category') || 'all' } catch { return 'all' }
+  })
   const [view, setView] = useState<'table' | 'kanban'>('table')
   const [userRole, setUserRole] = useState<string>('telephonist')
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
@@ -231,56 +253,239 @@ export default function ContactsPage() {
   const [telephonists, setTelephonists] = useState<{ id: string; name: string }[]>([])
   const [testUserIds, setTestUserIds] = useState<string[]>([])
   const [topLeadsAccess, setTopLeadsAccess] = useState(false)
+  const [trophySessions, setTrophySessions] = useState<Map<string, { status: string; nextActionDate?: string | null }>>(new Map())
+  const [adminTrophyMap, setAdminTrophyMap] = useState<Map<string, string>>(new Map())
+  const [totalCount, setTotalCount] = useState(0)
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [ownerScope, setOwnerScope] = useState<'all' | 'trophy' | 'regular'>(() => {
+    try { return (sessionStorage.getItem('contacts-scope') as 'all' | 'trophy' | 'regular') || 'all' } catch { return 'all' }
+  })
+  const loadIdRef = useRef(0)
+  // Tracks which contacts the current user has their own trophy session for (own session takes priority)
+  const myTrophyContactIds = useRef<Set<string>>(new Set())
+  // IDs of profiles with top_leads_access (trophy telephonists) — used for admin scope filter
+  const trophyUserIdsRef = useRef<string[]>([])
 
-  const CONTACT_BASE_COLUMNS = 'id,name,phone,email,company_name,industry,job_title,status,owner_id,created_by,locked_until,sale_locked,last_contacted,priority_score,next_action_date,next_action_time,investment_amount,lead_source,created_at'
+  const CONTACT_BASE_COLUMNS = 'id,name,phone,email,address,company_name,industry,job_title,status,owner_id,created_by,locked_until,sale_locked,last_contacted,priority_score,next_action_date,next_action_time,investment_amount,lead_source,created_at'
 
-  const loadContacts = useCallback(async (forUserId?: string | null, forRole?: string, excludeIds?: string[], forTopLeadsAccess?: boolean) => {
+  // Params ref: always holds latest values so the stable loadContacts closure never goes stale
+  const paramsRef = useRef({ userRole, currentUserId, testUserIds, topLeadsAccess, activeFilter, debouncedSearch, categoryFilter, page, view, ownerScope })
+  paramsRef.current = { userRole, currentUserId, testUserIds, topLeadsAccess, activeFilter, debouncedSearch, categoryFilter, page, view, ownerScope }
+
+  // Stable loadContacts — no stale closure issues because it reads from paramsRef
+  const loadContacts = useCallback(async (boot?: { userId: string; role: string; excludeIds: string[]; tla: boolean }) => {
+    const myId = ++loadIdRef.current
+    setLoadingContacts(true)
+
+    const p = boot
+      ? { ...paramsRef.current, currentUserId: boot.userId, userRole: boot.role, testUserIds: boot.excludeIds, topLeadsAccess: boot.tla }
+      : paramsRef.current
+
     const supabase = createClient()
-    const effectiveRole = forRole ?? userRole
-    const effectiveUserId = forUserId !== undefined ? forUserId : currentUserId
-    const effectiveExclude = excludeIds ?? testUserIds
-    const effectiveTopLeads = forTopLeadsAccess !== undefined ? forTopLeadsAccess : topLeadsAccess
+    const today = new Date().toISOString().slice(0, 10)
+    const isKanban = p.view === 'kanban'
+
+    // For admin + trophy scope (or probable filter): pre-fetched contact IDs from trophy sessions
+    // populated before buildQuery is called so closure sees updated value
+    let trophyStatusIds: string[] | null = null
 
     const buildQuery = (withRating: boolean) => {
-      let q = supabase
-        .from('contacts')
-        .select(withRating ? `${CONTACT_BASE_COLUMNS},rating,review_count` : CONTACT_BASE_COLUMNS)
-        .order('priority_score', { ascending: false })
-        .range(0, 9999)
-      if (withRating && effectiveTopLeads) {
-        // Top-rated mode: see ALL contacts with rating > 4 stars AND > 70 reviews,
-        // bypassing ownership/locking — these telephonists cover a different sales lane.
-        q = q.gt('rating', 4).gt('review_count', 70)
-      } else if (!isAdminRole(effectiveRole) && effectiveUserId) {
-        // Standard telephonist: only their own contacts (respecting 10-day lock rule).
-        const today = new Date().toISOString().slice(0, 10)
+      const cols = withRating ? `${CONTACT_BASE_COLUMNS},rating,review_count` : CONTACT_BASE_COLUMNS
+      // For admin/regular: server counts exact total for pagination
+      const countOpt = p.topLeadsAccess ? undefined : ({ count: 'exact' } as const)
+      let q = supabase.from('contacts').select(cols, countOpt)
+
+      if (p.topLeadsAccess) {
+        // Trophy: exclude ONLY contacts with an active time-lock (owner_id set + locked_until in the future).
+        // Contacts with owner_id but NO locked_until are "soft-assigned" (imported leads never time-locked)
+        // and should be visible to trophy — that's where all the rated Google Maps leads live.
+        // Condition: exclude where locked_until IS NOT NULL AND locked_until >= today AND owner_id IS NOT NULL.
+        // Equivalent to: include where (owner_id IS NULL) OR (locked_until IS NULL) OR (locked_until < today).
+        q = q
+          .or('sale_locked.is.false,sale_locked.is.null')
+          .or(`owner_id.is.null,locked_until.is.null,locked_until.lt.${today}`)
+        // Sort: Google Maps / rated contacts first (NULLS LAST), then newest by date within each group
+        q = (q as any)
+          .order('rating', { ascending: false, nullsFirst: false })
+          .order('created_at', { ascending: false })
+        q = q.range(0, 1999)
+      } else if (!isAdminRole(p.userRole) && p.currentUserId) {
+        // Regular telephonist: only their own contacts
         q = q.or([
-          `and(owner_id.eq.${effectiveUserId},sale_locked.eq.true)`,
-          `and(owner_id.eq.${effectiveUserId},locked_until.gte.${today})`,
-          `and(owner_id.eq.${effectiveUserId},locked_until.is.null)`,
-          `and(created_by.eq.${effectiveUserId},owner_id.is.null)`,
+          `and(owner_id.eq.${p.currentUserId},sale_locked.eq.true)`,
+          `and(owner_id.eq.${p.currentUserId},locked_until.gte.${today})`,
+          `and(owner_id.eq.${p.currentUserId},locked_until.is.null)`,
+          `and(created_by.eq.${p.currentUserId},owner_id.is.null)`,
         ].join(','))
+          .order('priority_score', { ascending: false })
+        // Regular telephonists have few contacts — load all
+        q = q.range(0, 9999)
+      } else {
+        // Admin: server-side pagination + filters
+        q = q.order('priority_score', { ascending: false })
+
+        // Owner scope: isolate trophy vs regular telephonist contacts
+        const trophyIds = trophyUserIdsRef.current
+        if (p.ownerScope === 'trophy') {
+          // When a status filter is active, trophyStatusIds holds the matching contact IDs from trophy_contact_sessions
+          if (trophyStatusIds !== null) {
+            q = trophyStatusIds.length > 0
+              ? q.in('id', trophyStatusIds)
+              : q.eq('id', '00000000-0000-0000-0000-000000000000')
+          } else if (trophyIds.length > 0) {
+            q = q.in('owner_id', trophyIds)
+          }
+        } else if (p.ownerScope === 'regular' && trophyIds.length > 0) {
+          q = q.not('owner_id', 'is', null)
+          q = q.not('owner_id', 'in', `(${trophyIds.join(',')})`)
+        }
+
+        if (!isKanban) {
+          if (p.activeFilter === 'today' && p.ownerScope !== 'trophy') q = q.eq('next_action_date', today)
+          // trophy scope + today: trophyStatusIds already filtered by session next_action_date
+          else if (p.activeFilter === 'high') q = q.gte('priority_score', 70)
+          // trophyStatusIds: status already filtered via id IN above (trophy scope) or applied below (all scope)
+          else if (trophyStatusIds !== null && p.ownerScope !== 'trophy') {
+            // ownerScope=all + probable: filter contacts by trophy session IDs
+            q = trophyStatusIds.length > 0
+              ? q.in('id', trophyStatusIds)
+              : q.eq('id', '00000000-0000-0000-0000-000000000000')
+          }
+          else if (trophyStatusIds !== null) { /* trophy scope: handled above */ }
+          else if (p.activeFilter === 'new') q = q.eq('status', 'new')
+          else if (p.activeFilter === 'canva') q = q.eq('status', 'canva')
+          else if (p.activeFilter === 'likely_sale') q = q.eq('status', 'likely_sale')
+          else if (p.activeFilter === 'likely_antisale') q = q.eq('status', 'likely_antisale')
+          else if (p.activeFilter === 'another_time') q = q.eq('status', 'another_time')
+          else if (p.activeFilter === 'no_answer') q = q.eq('status', 'no_answer')
+          else if (p.activeFilter === 'not_buying') q = q.eq('status', 'not_buying')
+          else if (p.activeFilter === 'bought') q = q.eq('status', 'bought')
+
+          if (p.debouncedSearch) {
+            const s = p.debouncedSearch.replace(/'/g, "''")
+            q = q.or(`name.ilike.%${s}%,phone.ilike.%${s}%`)
+          }
+          if (p.categoryFilter !== 'all') {
+            const cat = p.categoryFilter.replace(/'/g, "''")
+            q = q.or(`job_title.ilike.%${cat}%,industry.ilike.%${cat}%`)
+          }
+          const start = (p.page - 1) * PAGE_SIZE
+          q = q.range(start, start + PAGE_SIZE - 1)
+        } else {
+          // Kanban: load all statuses, up to 500
+          q = q.range(0, 499)
+        }
       }
       return q
     }
 
-    let { data, error } = await buildQuery(true)
-    if (error) {
-      // rating/review_count columns may not exist yet (pending migration) — retry without them
-      console.warn('[loadContacts] retrying without rating/review_count:', error.message)
-      ;({ data, error } = await buildQuery(false))
+    try {
+      // Admin: pre-fetch trophy session contact IDs.
+      // ownerScope=trophy: always — finds contacts worked by ANY trophy telephonist regardless of owner_id.
+      // ownerScope=all + probable: finds probable contacts in trophy sessions.
+      if (isAdminRole(p.userRole) && !isKanban &&
+          (p.ownerScope === 'trophy' || p.activeFilter === 'probable')) {
+        let sessQ = supabase
+          .from('trophy_contact_sessions')
+          .select('contact_id, updated_at')
+          .order('updated_at', { ascending: false })
+        if (p.ownerScope === 'trophy') {
+          // today: filter by session's next_action_date (trophy telephonists store dates in sessions, not contacts)
+          if (p.activeFilter === 'today') sessQ = sessQ.eq('next_action_date', today)
+          // specific status: filter by status; 'all' and 'high' need all IDs
+          else if (p.activeFilter !== 'all' && p.activeFilter !== 'high') sessQ = sessQ.eq('status', p.activeFilter)
+        } else {
+          sessQ = sessQ.eq('status', 'probable')
+        }
+        const { data: troSessions } = await sessQ
+        if (myId !== loadIdRef.current) return
+        const seen = new Set<string>()
+        trophyStatusIds = []
+        for (const s of troSessions ?? []) {
+          if (!seen.has(s.contact_id)) { seen.add(s.contact_id); trophyStatusIds.push(s.contact_id) }
+        }
+      }
+
+      if (p.topLeadsAccess) {
+        // Trophy: run contacts query + "locked by other trophy" query in parallel
+        const [lockedRes, rawRes] = await Promise.all([
+          supabase
+            .from('trophy_contact_sessions')
+            .select('contact_id')
+            .neq('owner_id', p.currentUserId)
+            .not('locked_until', 'is', null)
+            .gte('locked_until', today),
+          buildQuery(true),
+        ])
+        // Fallback if rating columns missing
+        let contactsRes = rawRes
+        if ((rawRes as any).error) {
+          console.warn('[loadContacts] trophy retrying without rating:', (rawRes as any).error.message)
+          contactsRes = await buildQuery(false)
+        }
+        if (myId !== loadIdRef.current) return
+        const lockedByOtherTrophy = new Set(((lockedRes as any).data ?? []).map((s: any) => s.contact_id))
+        const { data, error } = contactsRes as any
+        if (!error && data) {
+          const mapped = (data as any[]).map(rowToContact).filter(c => !lockedByOtherTrophy.has(c.id))
+          setContacts(mapped)
+          setTotalCount(mapped.length)
+        } else if (error) {
+          console.error('[loadContacts] trophy failed:', error.message)
+        }
+      } else {
+        // Admin / regular telephonist
+        let res = await buildQuery(true)
+        if ((res as any).error) {
+          console.warn('[loadContacts] retrying without rating/review_count:', (res as any).error.message)
+          res = await buildQuery(false)
+        }
+        if (myId !== loadIdRef.current) return
+        const { data, error } = res as any
+        if (!error && data) {
+          const mapped = (data as any[]).map(rowToContact)
+          // Deduplicate by id — a telephonist contact can match multiple OR conditions
+          // (e.g. sale_locked=true AND locked_until=null satisfies two arms of the compound or())
+          const seen = new Set<string>()
+          const deduped = mapped.filter(c => { if (seen.has(c.id)) return false; seen.add(c.id); return true })
+          const visible = isAdminRole(p.userRole) && p.testUserIds.length > 0
+            ? deduped.filter(c => !p.testUserIds.includes(c.ownerId ?? ''))
+            : deduped
+
+          // For admin: overlay trophy session statuses so trophy contacts show correct status
+          if (isAdminRole(p.userRole) && visible.length > 0) {
+            const { data: troData } = await supabase
+              .from('trophy_contact_sessions')
+              .select('contact_id, status, updated_at')
+              .in('contact_id', visible.map(c => c.id))
+              .order('updated_at', { ascending: false })
+            if (myId !== loadIdRef.current) return
+            const tMap = new Map<string, string>()
+            for (const s of troData ?? []) {
+              if (!tMap.has(s.contact_id)) tMap.set(s.contact_id, s.status)
+            }
+            if (tMap.size > 0) {
+              setAdminTrophyMap(prev => { const next = new Map(prev); tMap.forEach((st, cid) => next.set(cid, st)); return next })
+            }
+            setContacts(visible.map(c => tMap.has(c.id) ? { ...c, status: tMap.get(c.id)! } : c))
+          } else {
+            setContacts(visible)
+          }
+
+          if (isAdminRole(p.userRole) && !isKanban) {
+            const serverCount = (res as any).count ?? 0
+            setTotalCount(Math.max(0, serverCount - (deduped.length - visible.length)))
+          } else {
+            setTotalCount(visible.length)
+          }
+        } else if (error) {
+          console.error('[loadContacts] failed:', error.message)
+        }
+      }
+    } finally {
+      if (myId === loadIdRef.current) setLoadingContacts(false)
     }
-    if (!error && data) {
-      const contacts = data.map(rowToContact)
-      const visible = (isAdminRole(effectiveRole) && effectiveExclude.length > 0)
-        ? contacts.filter(c => !effectiveExclude.includes(c.ownerId ?? ''))
-        : contacts
-      setContacts(visible)
-    } else if (error) {
-      console.error('[loadContacts] failed:', error.message)
-    }
-    setLoadingContacts(false)
-  }, [userRole, currentUserId, testUserIds, topLeadsAccess])
+  }, []) // stable — reads from paramsRef
 
   useEffect(() => {
     const savedLang = localStorage.getItem('app-lang') as 'el' | 'en'
@@ -309,22 +514,64 @@ export default function ContactsPage() {
       if (data?.name) setUserName(data.name)
       if (tla) setTopLeadsAccess(true)
       setPendingRequests(reqs ?? [])
-      // Load telephonist list for admin reassignment + resolve test IDs
+      // Trophy telephonists: load ALL sessions so each trophy can see what others have set.
+      // Priority: current user's own session first, then most-recently-updated session from any other.
+      if (tla && user.id) {
+        const myId = user.id
+        supabase
+          .from('trophy_contact_sessions')
+          .select('contact_id, status, next_action_date, owner_id, updated_at')
+          .then(({ data: sessions }) => {
+            const grouped = new Map<string, any[]>()
+            for (const s of sessions ?? []) {
+              const arr = grouped.get(s.contact_id) ?? []
+              arr.push(s)
+              grouped.set(s.contact_id, arr)
+            }
+            const m = new Map<string, { status: string; nextActionDate?: string | null }>()
+            const ownIds = new Set<string>()
+            for (const [contactId, rows] of grouped) {
+              const own = rows.find(s => s.owner_id === myId)
+              if (own) ownIds.add(contactId)
+              const best = own ?? rows.sort((a, b) => (b.updated_at ?? '').localeCompare(a.updated_at ?? ''))[0]
+              m.set(contactId, { status: best.status, nextActionDate: best.next_action_date })
+            }
+            myTrophyContactIds.current = ownIds
+            setTrophySessions(m)
+          })
+      }
+      // Load telephonist list for admin reassignment + resolve test IDs + trophy user IDs
       const TEST_EMAILS = ['m0kis1991@gmail.com', 'm0kis@hotmail.com']
       let resolvedTestIds: string[] = []
       if (isAdminRole(role)) {
-        const { data: tels } = await supabase.from('profiles').select('id, name, email').eq('role', 'telephonist').eq('suspended', false)
+        const [{ data: tels }, { data: trophyProfiles }] = await Promise.all([
+          supabase.from('profiles').select('id, name, email').eq('role', 'telephonist').eq('suspended', false),
+          supabase.from('profiles').select('id').eq('top_leads_access', true),
+        ])
         const allTels = tels ?? []
         const filtered = allTels.filter(t => role === 'superadmin' || !TEST_EMAILS.includes(t.email))
         setTelephonists(filtered.map(({ id, name }) => ({ id, name })))
+        trophyUserIdsRef.current = (trophyProfiles ?? []).map((p: any) => p.id)
+        // Load all trophy sessions so admin can see what trophy telephonists have done to each contact
+        supabase.from('trophy_contact_sessions')
+          .select('contact_id, status, updated_at')
+          .order('updated_at', { ascending: false })
+          .then(({ data: sessions }) => {
+            const m = new Map<string, string>()
+            for (const s of sessions ?? []) {
+              if (!m.has(s.contact_id)) m.set(s.contact_id, s.status)
+            }
+            setAdminTrophyMap(m)
+          })
         if (role !== 'superadmin') {
           resolvedTestIds = allTels.filter(t => TEST_EMAILS.includes(t.email)).map(t => t.id)
           setTestUserIds(resolvedTestIds)
         }
       }
-      loadContacts(user.id, role, resolvedTestIds, tla)
+      loadContacts({ userId: user.id, role, excludeIds: resolvedTestIds, tla })
     }).catch(() => {})
-  }, [loadContacts])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // intentionally once — auth state is bootstrapped here, loadContacts reads paramsRef
 
   // Refetch when page is restored from browser bfcache (back/forward navigation)
   useEffect(() => {
@@ -333,9 +580,94 @@ export default function ContactsPage() {
     }
     window.addEventListener('pageshow', onPageShow)
     return () => window.removeEventListener('pageshow', onPageShow)
-  }, [loadContacts])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // loadContacts is stable
 
-  useEffect(() => { setPage(1) }, [searchTerm, activeFilter, categoryFilter])
+  // Debounce search input → debouncedSearch (triggers server reload for admin)
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchTerm), 300)
+    return () => clearTimeout(t)
+  }, [searchTerm])
+
+  // Reset to page 1 on any filter/search/scope change
+  useEffect(() => { setPage(1) }, [searchTerm, activeFilter, categoryFilter, ownerScope])
+
+  // Persist navigation state to sessionStorage so Back button restores position
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('contacts-page', String(page))
+      sessionStorage.setItem('contacts-filter', activeFilter)
+      sessionStorage.setItem('contacts-category', categoryFilter)
+      sessionStorage.setItem('contacts-scope', ownerScope)
+    } catch {}
+  }, [page, activeFilter, categoryFilter, ownerScope])
+
+  // Admin: server-side reload when filters or page change
+  useEffect(() => {
+    if (!currentUserId || topLeadsAccess || !isAdminRole(userRole)) return
+    loadContacts()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeFilter, debouncedSearch, categoryFilter, page, view, currentUserId, userRole, topLeadsAccess, ownerScope])
+
+  // Admin: auto-refresh contacts every 60 s so regular telephonist status changes appear without manual refresh
+  useEffect(() => {
+    if (!currentUserId || topLeadsAccess || !isAdminRole(userRole)) return
+    const t = setInterval(() => loadContacts(), 60_000)
+    return () => clearInterval(t)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUserId, userRole, topLeadsAccess])
+
+  // Admin: subscribe to trophy_contact_sessions so trophy telephonist status changes appear in real-time
+  useEffect(() => {
+    if (!currentUserId || topLeadsAccess || !isAdminRole(userRole)) return
+    const supabase = createClient()
+    const channel = supabase
+      .channel('admin-trophy-sessions-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'trophy_contact_sessions' }, (payload: any) => {
+        const row = payload.new ?? payload.old
+        if (!row?.contact_id || !row.status) return
+        // Update contacts array directly so status badge refreshes immediately
+        setContacts(prev => prev.map(c =>
+          c.id === row.contact_id ? { ...c, status: row.status } : c
+        ))
+      })
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUserId, userRole, topLeadsAccess])
+
+  // Trophy real-time: subscribe to ALL trophy_contact_sessions changes so every trophy
+  // telephonist sees status updates from colleagues without refreshing.
+  useEffect(() => {
+    if (!topLeadsAccess || !currentUserId) return
+    const supabase = createClient()
+    const channel = supabase
+      .channel('trophy-sessions-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'trophy_contact_sessions' }, (payload: any) => {
+        const row = payload.new ?? payload.old
+        if (!row?.contact_id) return
+        const isOwn = row.owner_id === currentUserId
+        if (isOwn) {
+          // Update from another device/tab for the current user — always apply
+          myTrophyContactIds.current.add(row.contact_id)
+          setTrophySessions(prev => {
+            const next = new Map(prev)
+            next.set(row.contact_id, { status: row.status ?? 'new', nextActionDate: row.next_action_date ?? null })
+            return next
+          })
+        } else if (!myTrophyContactIds.current.has(row.contact_id)) {
+          // Another trophy telephonist changed this contact and we don't have our own session — show their status
+          setTrophySessions(prev => {
+            const next = new Map(prev)
+            next.set(row.contact_id, { status: row.status ?? 'new', nextActionDate: row.next_action_date ?? null })
+            return next
+          })
+        }
+      })
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topLeadsAccess, currentUserId])
 
   const handleViewToggle = (v: 'table' | 'kanban') => {
     setView(v)
@@ -343,21 +675,59 @@ export default function ContactsPage() {
   }
 
   const isAdmin = userRole === 'admin' || userRole === 'superadmin'
-  const canEdit = (contact: Contact) => isAdmin || contact.ownerId === currentUserId || contact.ownerId === null || contact.createdBy === currentUserId
+  const canEdit = (contact: Contact) => topLeadsAccess || isAdmin || contact.ownerId === currentUserId || contact.ownerId === null || contact.createdBy === currentUserId
+
+  // For trophy telephonists: show their own session status in the list
+  // For admin: contact.status is already overlaid with trophy session status by loadContacts + realtime subscription
+  const effectiveStatus = (contact: Contact): string => {
+    if (topLeadsAccess) return trophySessions.get(contact.id)?.status ?? 'new'
+    return contact.status
+  }
+
+  // Returns the most relevant date for display: trophy session date takes precedence over contact's raw dates
+  const effectiveContactDate = (contact: Contact): ContactDateInfo | null => {
+    if (topLeadsAccess) {
+      const session = trophySessions.get(contact.id)
+      if (session?.nextActionDate) return { date: session.nextActionDate.slice(0, 10), type: 'followup' }
+    }
+    return getContactDate(contact)
+  }
+
+  // True if this contact has a follow-up scheduled for today (trophy-aware)
+  const isFollowupToday = (contact: Contact): boolean => {
+    const nextDate = topLeadsAccess
+      ? (trophySessions.get(contact.id)?.nextActionDate ?? contact.nextActionDate)
+      : contact.nextActionDate
+    return nextDate === todayISO()
+  }
 
   // ── Filters ────────────────────────────────────────────────────────────────
   const applyFilter = (c: Contact): boolean => {
+    const st = effectiveStatus(c)
     switch (activeFilter) {
-      case 'today':  return c.nextActionDate === todayISO()
-      case 'high':   return (c.priorityScore ?? 0) >= 70
-      case 'new':    return c.status === 'new'
-      case 'likely': return c.status === 'likely_sale' || c.status === 'likely_antisale'
-      case 'bought': return c.status === 'bought'
+      case 'today': {
+        const nextDate = topLeadsAccess ? (trophySessions.get(c.id)?.nextActionDate ?? c.nextActionDate) : c.nextActionDate
+        return nextDate === todayISO()
+      }
+      case 'high':            return (c.priorityScore ?? 0) >= 70
+      case 'new':             return st === 'new'
+      case 'canva':           return st === 'canva'
+      case 'probable':        return st === 'probable'
+      case 'likely_sale':     return topLeadsAccess ? (st === 'likely_sale' || st === 'likely_antisale') : st === 'likely_sale'
+      case 'likely_antisale': return st === 'likely_antisale'
+      case 'another_time':    return st === 'another_time'
+      case 'no_answer':       return st === 'no_answer'
+      case 'not_buying':      return st === 'not_buying'
+      case 'bought':          return st === 'bought'
+      case 'few_reviews':     return st === 'few_reviews'
       default: return true
     }
   }
 
-  const todayCount = useMemo(() => contacts.filter(c => c.nextActionDate === todayISO()).length, [contacts])
+  const todayCount = useMemo(() => contacts.filter(c => {
+    const nextDate = topLeadsAccess ? (trophySessions.get(c.id)?.nextActionDate ?? c.nextActionDate) : c.nextActionDate
+    return nextDate === todayISO()
+  }).length, [contacts, topLeadsAccess, trophySessions])
 
   // Distinct categories derived from contacts (jobTitle + industry)
   const categoryOptions = useMemo(() => {
@@ -369,25 +739,42 @@ export default function ContactsPage() {
     return Array.from(cats).sort((a, b) => a.localeCompare(b, 'el'))
   }, [contacts])
 
-  const filtered = useMemo(() => contacts.filter(c => {
-    if (!applyFilter(c)) return false
-    if (categoryFilter !== 'all') {
-      const cat = categoryFilter.toLowerCase()
-      const match =
-        (c.jobTitle ?? '').toLowerCase().includes(cat) ||
-        (c.industry ?? '').toLowerCase().includes(cat)
-      if (!match) return false
-    }
-    if (!searchTerm) return true
-    return (
-      c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      parsePhonesField(c.phone || '').join(' ').includes(searchTerm)
-    )
-  }), [contacts, searchTerm, activeFilter, categoryFilter])
+  const filtered = useMemo(() => {
+    // Admin: server already filtered and paginated — contacts IS the current page
+    if (isAdmin && !topLeadsAccess) return contacts
+    return contacts.filter(c => {
+      if (!applyFilter(c)) return false
+      if (categoryFilter !== 'all') {
+        const cat = categoryFilter.toLowerCase()
+        if (!(
+          (c.jobTitle ?? '').toLowerCase().includes(cat) ||
+          (c.industry ?? '').toLowerCase().includes(cat)
+        )) return false
+      }
+      // Trophy 'all' view: hide worked contacts so telephonists only see fresh leads.
+      // Specific-status filters intentionally show worked contacts in that pipeline stage.
+      const isGenericView = activeFilter === 'all' || activeFilter === 'new'
+      if (topLeadsAccess && isGenericView && trophySessions.has(c.id)) return false
+      if (!searchTerm) return true
+      // When searching, always hide worked contacts (search is for finding fresh leads)
+      if (topLeadsAccess && trophySessions.has(c.id)) return false
+      return (
+        c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        parsePhonesField(c.phone || '').join(' ').includes(searchTerm)
+      )
+    })
+    // Trophy sort is done server-side (rating DESC, review_count DESC, created_at DESC)
+  }, [contacts, searchTerm, activeFilter, categoryFilter, topLeadsAccess, trophySessions, isAdmin])
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  // Admin: server provides total count; others: count is from filtered list
+  const totalPages = Math.max(1, Math.ceil(
+    (isAdmin && !topLeadsAccess) ? totalCount / PAGE_SIZE : filtered.length / PAGE_SIZE
+  ))
   const safePage = Math.min(page, totalPages)
-  const paginated = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
+  // Admin: contacts is already the server-paginated page; others: slice client-side
+  const paginated = (isAdmin && !topLeadsAccess)
+    ? contacts
+    : filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
 
   // ── Status helpers ─────────────────────────────────────────────────────────
   const handleSendJ2TEmail = (contact: Contact) => {
@@ -401,20 +788,38 @@ export default function ContactsPage() {
 
   const handleStatusChange = async (id: string, status: LeadStatus) => {
     const supabase = createClient()
-    const { error } = await supabase.from('contacts').update({ status }).eq('id', id)
-    if (!error) {
-      setContacts(prev => prev.map(c => c.id === id ? { ...c, status } : c))
+    if (topLeadsAccess && currentUserId) {
+      const { error } = await supabase
+        .from('trophy_contact_sessions')
+        .upsert({ contact_id: id, owner_id: currentUserId, status, updated_at: new Date().toISOString() }, { onConflict: 'contact_id,owner_id' })
+      if (!error) {
+        myTrophyContactIds.current.add(id)
+        setTrophySessions(prev => {
+          const next = new Map(prev)
+          const existing = next.get(id) ?? {}
+          next.set(id, { ...existing, status })
+          return next
+        })
+      }
+    } else {
+      const { error } = await supabase.from('contacts').update({ status }).eq('id', id)
+      if (!error) {
+        setContacts(prev => prev.map(c => c.id === id ? { ...c, status } : c))
+      }
     }
   }
 
   const getStatusBadge = (status: string) => {
     switch (status) {
-      case 'bought':        return <Badge className="bg-green-500 hover:bg-green-600 text-[10px]">{lang === 'el' ? 'Αγόρασε' : 'Bought'}</Badge>
+      case 'bought':          return <Badge className="bg-green-500 hover:bg-green-600 text-[10px]">{lang === 'el' ? 'Αγόρασε' : 'Bought'}</Badge>
       case 'canva':           return <Badge className="bg-purple-500 text-white text-[10px]">Canva</Badge>
+      case 'probable':        return <Badge className="bg-teal-500 text-white text-[10px]">Πιθανός</Badge>
       case 'likely_sale':     return <Badge className="bg-amber-500 text-white text-[10px]">Sale</Badge>
       case 'likely_antisale': return <Badge className="bg-amber-800 text-white text-[10px]">Antisale</Badge>
-      case 'no_answer':     return <Badge className="bg-orange-500 hover:bg-orange-600 text-white text-[10px]">{lang === 'el' ? 'Δεν Απάντησε' : 'No Answer'}</Badge>
-      case 'not_buying':    return <Badge variant="destructive" className="text-[10px]">{lang === 'el' ? 'Όχι' : 'No'}</Badge>
+      case 'another_time':    return <Badge className="bg-indigo-500 text-white text-[10px]">{lang === 'el' ? 'Άλλη Στιγμή' : 'Another Time'}</Badge>
+      case 'few_reviews':     return <Badge className="bg-sky-500 text-white text-[10px]">Λίγες Αξιολ.</Badge>
+      case 'no_answer':       return <Badge className="bg-orange-500 hover:bg-orange-600 text-white text-[10px]">{lang === 'el' ? 'Δεν Απάντησε' : 'No Answer'}</Badge>
+      case 'not_buying':      return <Badge variant="destructive" className="text-[10px]">{lang === 'el' ? 'Όχι' : 'No'}</Badge>
       default:              return <Badge variant="secondary" className="text-[10px]">{lang === 'el' ? 'Νέο' : 'New'}</Badge>
     }
   }
@@ -462,18 +867,39 @@ export default function ContactsPage() {
   }
 
   // ── Export CSV ─────────────────────────────────────────────────────────────
-  const handleExportCSV = () => {
-    const cols = ['Όνομα', 'Τηλέφωνο', 'Email', 'Επάγγελμα', 'Κλάδος', 'Κατάσταση', 'Επένδυση', 'Σκορ', 'Ημερομηνία']
-    const rows = filtered.map(c => [
-      c.name, c.phone, c.email, c.jobTitle ?? '', c.industry ?? '',
-      c.status, c.investmentAmount, c.priorityScore, getContactDate(c)?.date ?? ''
-    ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))
-    const csv = [cols.join(','), ...rows].join('\n')
+  const handleExportCSV = async () => {
+    const toRows = (rows: Contact[]) => {
+      const cols = ['Όνομα', 'Τηλέφωνο', 'Email', 'Επάγγελμα', 'Κλάδος', 'Κατάσταση', 'Επένδυση', 'Σκορ', 'Ημερομηνία']
+      const lines = rows.map(c => [
+        c.name, c.phone, c.email, c.jobTitle ?? '', c.industry ?? '',
+        c.status, c.investmentAmount, c.priorityScore, getContactDate(c)?.date ?? ''
+      ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))
+      return [cols.join(','), ...lines].join('\n')
+    }
+    let exportRows = filtered
+    // Admin: filtered is only the current page — do a full DB query for export
+    if (isAdmin && !topLeadsAccess) {
+      const supabase = createClient()
+      const today = new Date().toISOString().slice(0, 10)
+      let q = supabase.from('contacts').select(CONTACT_BASE_COLUMNS).order('priority_score', { ascending: false }).range(0, 9999)
+      if (paramsRef.current.activeFilter === 'today') q = q.eq('next_action_date', today)
+      else if (paramsRef.current.activeFilter === 'high') q = q.gte('priority_score', 70)
+      else if (paramsRef.current.activeFilter === 'new') q = q.eq('status', 'new')
+      else if (paramsRef.current.activeFilter === 'likely_sale') q = q.in('status', ['likely_sale', 'likely_antisale'])
+      else if (paramsRef.current.activeFilter === 'bought') q = q.eq('status', 'bought')
+      if (paramsRef.current.debouncedSearch) {
+        const s = paramsRef.current.debouncedSearch.replace(/'/g, "''")
+        q = q.or(`name.ilike.%${s}%,phone.ilike.%${s}%`)
+      }
+      const { data } = await q
+      exportRows = (data ?? []).map(rowToContact).filter(c => !testUserIds.includes(c.ownerId ?? ''))
+    }
+    const csv = toRows(exportRows)
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a'); a.href = url; a.download = `contacts-${todayISO()}.csv`
     a.click(); URL.revokeObjectURL(url)
-    toast({ title: lang === 'el' ? `Εξαγωγή ${filtered.length} επαφών` : `Exported ${filtered.length} contacts` })
+    toast({ title: lang === 'el' ? `Εξαγωγή ${exportRows.length} επαφών` : `Exported ${exportRows.length} contacts` })
   }
 
   const handleNewLeadSave = async () => {
@@ -589,12 +1015,20 @@ export default function ContactsPage() {
     const ids = Array.from(dupSelected)
     try {
       const supabase = createClient()
-      // Delete in batches of 50 to stay well within URL length limits
+      const { data: { session } } = await supabase.auth.getSession()
+      const token = session?.access_token ?? ''
       const BATCH = 50
       for (let i = 0; i < ids.length; i += BATCH) {
         const batch = ids.slice(i, i + BATCH)
-        const { error } = await supabase.from('contacts').delete().in('id', batch)
-        if (error) throw new Error(error.message)
+        const res = await fetch('/api/contacts/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ ids: batch }),
+        })
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}))
+          throw new Error(body.error || `Delete failed (${res.status})`)
+        }
       }
       toast({ title: lang === 'el' ? `${ids.length} διπλότυπες επαφές διαγράφηκαν` : `${ids.length} duplicate contacts deleted` })
       setContacts(prev => prev.filter(c => !dupSelected.has(c.id)))
@@ -610,13 +1044,29 @@ export default function ContactsPage() {
   }
 
   // ── Filter chips ───────────────────────────────────────────────────────────
-  const FILTERS: { key: FilterKey; labelEl: string; labelEn: string; badge?: number }[] = [
-    { key: 'all',    labelEl: 'Όλες',                labelEn: 'All' },
-    { key: 'today',  labelEl: 'Ακολούθηση σήμερα',    labelEn: "Today's Follow-ups", badge: todayCount },
-    { key: 'high',   labelEl: 'Υψηλή Προτεραιότητα', labelEn: 'High Priority' },
-    { key: 'new',    labelEl: 'Νέοι',                labelEn: 'New' },
-    { key: 'likely', labelEl: 'Πιθανοί',             labelEn: 'Likely' },
-    { key: 'bought', labelEl: 'Αγόρασαν',            labelEn: 'Bought' },
+  const FILTERS: { key: FilterKey; labelEl: string; labelEn: string; badge?: number }[] = topLeadsAccess ? [
+    { key: 'all',           labelEl: 'Όλες',                 labelEn: 'All' },
+    { key: 'today',         labelEl: 'Ακολούθηση σήμερα',    labelEn: "Today's Follow-ups", badge: todayCount },
+    { key: 'new',           labelEl: 'Νέοι',                 labelEn: 'New' },
+    { key: 'canva',         labelEl: 'Canva',                labelEn: 'Canva' },
+    { key: 'probable',      labelEl: 'Πιθανός',              labelEn: 'Probable' },
+    { key: 'another_time',  labelEl: 'Άλλη Στιγμή',          labelEn: 'Another Time' },
+    { key: 'few_reviews',   labelEl: 'Λίγες Αξιολογήσεις',  labelEn: 'Few Reviews' },
+    { key: 'no_answer',     labelEl: 'Δεν Απάντησε',         labelEn: 'No Answer' },
+    { key: 'not_buying',    labelEl: 'Όχι',                  labelEn: 'Declined' },
+    { key: 'bought',        labelEl: 'Αγόρασαν',             labelEn: 'Bought' },
+  ] : [
+    { key: 'all',            labelEl: 'Όλες',                 labelEn: 'All' },
+    { key: 'today',          labelEl: 'Ακολούθηση σήμερα',    labelEn: "Today's Follow-ups", badge: todayCount },
+    { key: 'high',           labelEl: 'Υψηλή Προτεραιότητα', labelEn: 'High Priority' },
+    { key: 'new',            labelEl: 'Νέοι',                 labelEn: 'New' },
+    { key: 'canva',          labelEl: 'Canva',                labelEn: 'Canva' },
+    { key: 'probable',       labelEl: 'Πιθανός',              labelEn: 'Probable' },
+    { key: 'likely_sale',    labelEl: 'Sale',                 labelEn: 'Sale' },
+    { key: 'likely_antisale',labelEl: 'Antisale',             labelEn: 'Antisale' },
+    { key: 'no_answer',      labelEl: 'Δεν Απάντησε',         labelEn: 'No Answer' },
+    { key: 'not_buying',     labelEl: 'Δεν Αγοράζει',         labelEn: 'Not Buying' },
+    { key: 'bought',         labelEl: 'Αγόρασαν',             labelEn: 'Bought' },
   ]
 
   return (
@@ -699,9 +1149,35 @@ export default function ContactsPage() {
                 </button>
               )}
               <span className="text-xs text-muted-foreground whitespace-nowrap">
-                {filtered.length} {lang === 'el' ? 'επαφές' : 'contacts'}
+                {(isAdmin && !topLeadsAccess) ? totalCount : filtered.length} {lang === 'el' ? 'επαφές' : 'contacts'}
               </span>
             </div>
+
+            {/* Owner scope toggle — admin only, separates trophy from regular contacts */}
+            {isAdmin && !topLeadsAccess && (
+              <div className="flex items-center gap-1 p-0.5 rounded-lg bg-muted/60 border border-border/50 w-fit">
+                {([
+                  { key: 'all',     labelEl: 'Όλες',       icon: null },
+                  { key: 'trophy',  labelEl: 'Trophy',     icon: 'crown' },
+                  { key: 'regular', labelEl: 'Κανονικές',  icon: 'users' },
+                ] as const).map(s => (
+                  <button
+                    key={s.key}
+                    onClick={() => setOwnerScope(s.key)}
+                    className={cn(
+                      "flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all",
+                      ownerScope === s.key
+                        ? "bg-background shadow-sm text-foreground border border-border/80"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    {s.icon === 'crown' && <Crown className="h-3 w-3 text-amber-500" />}
+                    {s.icon === 'users' && <Users className="h-3 w-3" />}
+                    {s.labelEl}
+                  </button>
+                ))}
+              </div>
+            )}
 
             {/* Filter chips */}
             <div className="flex flex-wrap gap-1.5">
@@ -780,20 +1256,36 @@ export default function ContactsPage() {
                     return (
                       <div key={contact.id}
                         className="bg-card border rounded-xl p-3 shadow-sm active:bg-muted/50 transition-colors"
-                        onClick={() => router.push(`/contacts/details?id=${contact.id}`)}>
+                        onClick={() => router.push(`/contacts/details?id=${contact.id}${ownerScope === 'trophy' ? '&scope=trophy' : ''}`)}>
                         <div className="flex items-start justify-between gap-2">
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            {contact.nextActionDate === todayISO() && (
-                              <span className="h-2 w-2 rounded-full bg-amber-400 shrink-0" />
-                            )}
-                            {locked && <Lock className="h-3 w-3 text-muted-foreground shrink-0" />}
-                            <span className="font-semibold text-sm truncate">{contact.name}</span>
+                          <div className="flex flex-col min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              {isFollowupToday(contact) && (
+                                <span className="h-2 w-2 rounded-full bg-amber-400 shrink-0" />
+                              )}
+                              {locked && <Lock className="h-3 w-3 text-muted-foreground shrink-0" />}
+                              <span className="font-semibold text-sm truncate">{contact.name}</span>
+                            </div>
+                            {(topLeadsAccess || isAdmin) && contact.rating != null ? (
+                              <div className="flex items-center flex-wrap gap-1 mt-0.5">
+                                <span className="flex items-center gap-0.5 text-amber-500 font-bold text-xs">
+                                  <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400 shrink-0" />
+                                  {Number(contact.rating).toFixed(1)} ★
+                                </span>
+                                {contact.reviewCount != null && <span className="text-[10px] text-muted-foreground">({contact.reviewCount})</span>}
+                                {contact.leadSource && (
+                                  <span className="text-[10px] bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300 px-1 py-0.5 rounded font-medium shrink-0">{contact.leadSource}</span>
+                                )}
+                              </div>
+                            ) : contact.leadSource ? (
+                              <span className="text-[10px] text-muted-foreground mt-0.5 truncate">{contact.leadSource}</span>
+                            ) : null}
                           </div>
-                          {getStatusBadge(contact.status)}
+                          {getStatusBadge(effectiveStatus(contact))}
                         </div>
                         <div className="flex items-center gap-3 mt-1">
                           {(() => {
-                            const di = getContactDate(contact)
+                            const di = effectiveContactDate(contact)
                             if (!di) return null
                             if (di.type === 'followup') return (
                               <span className="flex flex-col gap-0">
@@ -846,6 +1338,7 @@ export default function ContactsPage() {
                         <TableHead>{lang === 'el' ? 'Κατάσταση' : 'Status'}</TableHead>
                         <TableHead>{lang === 'el' ? 'Ημερομηνία' : 'Date'}</TableHead>
                         <TableHead>{lang === 'el' ? 'Επένδυση' : 'Investment'}</TableHead>
+                        {topLeadsAccess && <TableHead className="text-center"><span className="flex items-center justify-center gap-1"><Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />{lang === 'el' ? 'Βαθμολογία' : 'Rating'}</span></TableHead>}
                         {isAdmin && <TableHead>{lang === 'el' ? 'Τηλεφωνητής' : 'Assigned to'}</TableHead>}
                         <TableHead className="text-right">{lang === 'el' ? 'Ενέργειες' : 'Actions'}</TableHead>
                       </TableRow>
@@ -853,7 +1346,7 @@ export default function ContactsPage() {
                     <TableBody>
                       {paginated.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={isAdmin ? 7 : 6} className="h-24 text-center text-muted-foreground">
+                          <TableCell colSpan={isAdmin ? 7 : topLeadsAccess ? 7 : 6} className="h-24 text-center text-muted-foreground">
                             {lang === 'el' ? 'Δεν βρέθηκαν επαφές.' : 'No contacts found.'}
                           </TableCell>
                         </TableRow>
@@ -861,10 +1354,10 @@ export default function ContactsPage() {
                         const locked = !isAdmin && contact.ownerId !== null && contact.ownerId !== currentUserId
                         return (
                           <TableRow key={contact.id} className="cursor-pointer hover:bg-muted/50"
-                            onClick={() => router.push(`/contacts/details?id=${contact.id}`)}>
+                            onClick={() => router.push(`/contacts/details?id=${contact.id}${ownerScope === 'trophy' ? '&scope=trophy' : ''}`)}>
                             <TableCell className="font-medium">
                               <div className="flex items-center gap-1.5">
-                                {contact.nextActionDate === todayISO() && (
+                                {isFollowupToday(contact) && (
                                   <span className="h-2 w-2 rounded-full bg-amber-400 shrink-0" title="Ακολούθηση σήμερα" />
                                 )}
                                 {locked && <Lock className="h-3 w-3 text-muted-foreground shrink-0" />}
@@ -881,10 +1374,10 @@ export default function ContactsPage() {
                                 <span className="text-[10px]">{contact.priorityScore}%</span>
                               </div>
                             </TableCell>
-                            <TableCell>{getStatusBadge(contact.status)}</TableCell>
+                            <TableCell>{getStatusBadge(effectiveStatus(contact))}</TableCell>
                             <TableCell className="text-xs">
                               {(() => {
-                                const di = getContactDate(contact)
+                                const di = effectiveContactDate(contact)
                                 if (!di) return <span className="text-muted-foreground">—</span>
                                 if (di.type === 'followup') return (
                                   <span className="flex flex-col gap-0 text-amber-600 font-medium">
@@ -903,6 +1396,28 @@ export default function ContactsPage() {
                             <TableCell className="text-xs">
                               {contact.investmentAmount > 0 ? `€${contact.investmentAmount.toLocaleString()}` : "—"}
                             </TableCell>
+                            {topLeadsAccess && (
+                              <TableCell className="text-center">
+                                {contact.rating != null ? (
+                                  <div className="flex flex-col items-center gap-1">
+                                    <span className="flex items-center gap-1 text-amber-500 font-bold text-sm">
+                                      <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
+                                      {Number(contact.rating).toFixed(1)} ★
+                                    </span>
+                                    {contact.reviewCount != null && (
+                                      <span className="text-[11px] text-muted-foreground">{contact.reviewCount} {lang === 'el' ? 'αξιολογήσεις' : 'reviews'}</span>
+                                    )}
+                                    {contact.leadSource && (
+                                      <span className="text-[11px] bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300 px-2 py-0.5 rounded-full font-semibold whitespace-nowrap">{contact.leadSource}</span>
+                                    )}
+                                  </div>
+                                ) : contact.leadSource ? (
+                                  <span className="text-[11px] bg-muted text-muted-foreground px-2 py-0.5 rounded-full whitespace-nowrap">{contact.leadSource}</span>
+                                ) : (
+                                  <span className="text-muted-foreground text-xs">—</span>
+                                )}
+                              </TableCell>
+                            )}
                             {isAdmin && (
                               <TableCell onClick={e => e.stopPropagation()}>
                                 <Select
@@ -1013,9 +1528,13 @@ export default function ContactsPage() {
             {/* ── KANBAN VIEW ─────────────────────────────────────────────── */}
             {!loadingContacts && view === 'kanban' && (
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                {STATUS_COLS.map(col => {
+                {(topLeadsAccess ? TROPHY_STATUS_COLS : STATUS_COLS).map(col => {
                   const colContacts = filtered
-                    .filter(c => c.status === col.key)
+                    .filter(c => {
+                      const st = effectiveStatus(c)
+                      const mapped = topLeadsAccess && st === STATUS.LIKELY_ANTISALE ? STATUS.LIKELY_SALE : st
+                      return mapped === col.key
+                    })
                     .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
                   return (
                     <div key={col.key} className="flex flex-col gap-2">
@@ -1036,7 +1555,7 @@ export default function ContactsPage() {
                           return (
                             <Card key={contact.id}
                               className="cursor-pointer hover:border-primary transition-all shadow-sm"
-                              onClick={() => router.push(`/contacts/details?id=${contact.id}`)}>
+                              onClick={() => router.push(`/contacts/details?id=${contact.id}${ownerScope === 'trophy' ? '&scope=trophy' : ''}`)}>
                               <CardHeader className="p-3 pb-1">
                                 <div className="flex items-start justify-between gap-1">
                                   <div className="flex-1 min-w-0">
@@ -1048,7 +1567,7 @@ export default function ContactsPage() {
                                       <p className="text-[10px] text-muted-foreground truncate">{contact.jobTitle}</p>
                                     )}
                                     {(() => {
-                                      const di = getContactDate(contact)
+                                      const di = effectiveContactDate(contact)
                                       if (!di) return null
                                       if (di.type === 'followup') return (
                                         <span className="flex flex-col gap-0 mt-0.5">
@@ -1066,7 +1585,7 @@ export default function ContactsPage() {
                                       return <span className="text-[9px] text-muted-foreground/50 block mt-0.5">{formatDateShort(di.date)}</span>
                                     })()}
                                   </div>
-                                  {contact.nextActionDate === todayISO() && (
+                                  {isFollowupToday(contact) && (
                                     <span className="h-2 w-2 rounded-full bg-amber-400 shrink-0 mt-1" title="Ακολούθηση σήμερα" />
                                   )}
                                 </div>
@@ -1085,7 +1604,7 @@ export default function ContactsPage() {
                                 </div>
                                 {canEdit(contact) && (
                                   <div className="flex gap-0.5 flex-wrap pt-0.5" onClick={e => e.stopPropagation()}>
-                                    {STATUS_COLS.filter(s => s.key !== col.key).map(s => (
+                                    {(topLeadsAccess ? TROPHY_STATUS_COLS : STATUS_COLS).filter(s => s.key !== col.key).map(s => (
                                       <button key={s.key}
                                         className="text-[10px] px-2 py-1 min-h-[28px] rounded bg-muted hover:bg-muted-foreground/20 text-muted-foreground font-medium transition-colors"
                                         onClick={() => handleStatusChange(contact.id, s.key)}>
