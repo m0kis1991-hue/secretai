@@ -327,13 +327,28 @@ export default function ContactsPage() {
         // Owner scope: isolate trophy vs regular telephonist contacts
         const trophyIds = trophyUserIdsRef.current
         if (p.ownerScope === 'trophy') {
-          // When a status filter is active, trophyStatusIds holds the matching contact IDs from trophy_contact_sessions
-          if (trophyStatusIds !== null) {
-            q = trophyStatusIds.length > 0
-              ? q.in('id', trophyStatusIds)
-              : q.eq('id', '00000000-0000-0000-0000-000000000000')
-          } else if (trophyIds.length > 0) {
-            q = q.in('owner_id', trophyIds)
+          // Two sources of trophy contacts must be unioned:
+          // 1. Session contacts: imported leads worked via trophy_contact_sessions (status stored there, contacts.status='new')
+          // 2. Owned contacts: contacts created directly by trophy telephonists (status stored in contacts.status)
+          // Without the OR, directly-created contacts with no session row were invisible to admin.
+          const sessionPart = trophyStatusIds !== null && trophyStatusIds.length > 0
+            ? `id.in.(${trophyStatusIds.join(',')})` : null
+          let ownedPart: string | null = null
+          if (trophyIds.length > 0) {
+            const ownerFilter = `owner_id.in.(${trophyIds.join(',')})`
+            if (p.activeFilter === 'all' || p.activeFilter === 'high') {
+              ownedPart = ownerFilter
+            } else if (p.activeFilter === 'today') {
+              ownedPart = `and(${ownerFilter},next_action_date.eq.${today})`
+            } else {
+              ownedPart = `and(${ownerFilter},status.eq.${p.activeFilter})`
+            }
+          }
+          const orParts = [sessionPart, ownedPart].filter(Boolean) as string[]
+          if (orParts.length > 0) {
+            q = q.or(orParts.join(','))
+          } else {
+            q = q.eq('id', '00000000-0000-0000-0000-000000000000')
           }
         } else if (p.ownerScope === 'regular' && trophyIds.length > 0) {
           q = q.not('owner_id', 'is', null)
@@ -342,7 +357,7 @@ export default function ContactsPage() {
 
         if (!isKanban) {
           if (p.activeFilter === 'today' && p.ownerScope !== 'trophy') q = q.eq('next_action_date', today)
-          // trophy scope + today: trophyStatusIds already filtered by session next_action_date
+          // trophy scope + today: handled in OR condition above (session contacts via pre-fetch, owned contacts via next_action_date.eq)
           else if (p.activeFilter === 'high') q = q.gte('priority_score', 70)
           // trophyStatusIds: status already filtered via id IN above (trophy scope) or applied below (all scope)
           else if (trophyStatusIds !== null && p.ownerScope !== 'trophy') {
@@ -468,7 +483,7 @@ export default function ContactsPage() {
             if (tMap.size > 0) {
               setAdminTrophyMap(prev => { const next = new Map(prev); tMap.forEach((st, cid) => next.set(cid, st)); return next })
             }
-            setContacts(visible.map(c => tMap.has(c.id) ? { ...c, status: tMap.get(c.id)! } : c))
+            setContacts(visible.map(c => tMap.has(c.id) ? { ...c, status: tMap.get(c.id)! as LeadStatus } : c))
           } else {
             setContacts(visible)
           }
