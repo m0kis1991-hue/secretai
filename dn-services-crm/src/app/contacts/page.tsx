@@ -828,8 +828,23 @@ export default function ContactsPage() {
   }, [contacts])
 
   const filtered = useMemo(() => {
-    // Admin: server already filtered and paginated — contacts IS the current page
-    if (isAdmin && !topLeadsAccess) return contacts
+    // Admin: server already filtered and paginated — contacts IS the current page.
+    // Exception: trophy scope with a specific status filter — apply client-side status check
+    // so that when a trophy telephonist changes status (realtime update hits contacts state),
+    // the contact immediately leaves the old filter category without waiting for a server reload.
+    if (isAdmin && !topLeadsAccess) {
+      // Kanban loads all statuses; skip client-side filter so all columns show correctly
+      const isTrophyStatusFilter = view !== 'kanban' && ownerScope === 'trophy' &&
+        activeFilter !== 'all' && activeFilter !== 'high' && activeFilter !== 'today'
+      if (isTrophyStatusFilter) {
+        return contacts.filter(c => {
+          const st = c.status as string
+          if (activeFilter === 'likely_sale') return st === 'likely_sale' || st === 'likely_antisale'
+          return st === activeFilter
+        })
+      }
+      return contacts
+    }
     return contacts.filter(c => {
       if (!applyFilter(c)) return false
       if (categoryFilter !== 'all') {
@@ -856,16 +871,18 @@ export default function ContactsPage() {
       )
     })
     // Trophy sort is done server-side (rating DESC, review_count DESC, created_at DESC)
-  }, [contacts, searchTerm, activeFilter, categoryFilter, topLeadsAccess, trophySessions, isAdmin, currentUserId])
+  }, [contacts, searchTerm, activeFilter, categoryFilter, topLeadsAccess, trophySessions, isAdmin, currentUserId, ownerScope, view])
 
-  // Admin: server provides total count; others: count is from filtered list
+  // Admin uses server-side pagination: totalCount drives page count, contacts is the current page.
+  // For trophy scope with a status filter, use filtered (client-side status filter) for display
+  // so that realtime status changes move contacts out of the wrong category immediately.
+  // Page count still uses totalCount so server-side navigation keeps working.
   const totalPages = Math.max(1, Math.ceil(
     (isAdmin && !topLeadsAccess) ? totalCount / PAGE_SIZE : filtered.length / PAGE_SIZE
   ))
   const safePage = Math.min(page, totalPages)
-  // Admin: contacts is already the server-paginated page; others: slice client-side
   const paginated = (isAdmin && !topLeadsAccess)
-    ? contacts
+    ? filtered   // filtered = contacts (with optional trophy status filter applied client-side)
     : filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
 
   // ── Status helpers ─────────────────────────────────────────────────────────
