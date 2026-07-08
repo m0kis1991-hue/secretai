@@ -696,7 +696,7 @@ export default function ContactsPage() {
   // For trophy telephonists: show their own session status in the list
   // For admin: contact.status is already overlaid with trophy session status by loadContacts + realtime subscription
   const effectiveStatus = (contact: Contact): string => {
-    if (topLeadsAccess) return trophySessions.get(contact.id)?.status ?? 'new'
+    if (topLeadsAccess) return trophySessions.get(contact.id)?.status ?? contact.status
     return contact.status
   }
 
