@@ -52,7 +52,7 @@ import {
 } from "@/components/ui/dialog"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Contact } from "@/app/lib/types"
-import { isAdmin as isAdminRole } from "@/app/lib/constants"
+import { isAdmin as isAdminRole, LeadStatus } from "@/app/lib/constants"
 import { rowToContact } from "@/app/lib/contact-utils"
 import { useRouter } from "next/navigation"
 import { intelligentObservationSummary, IntelligentObservationSummaryOutput } from "@/ai/flows/intelligent-observation-summary-flow"
@@ -196,16 +196,25 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
           setSaleAmount(session.investment_amount ?? 0)
         } else {
           setTrophySessionId(null)
-          setContact(prev => prev ? {
-            ...prev,
-            observations: '',
-            status: 'new',
-            nextActionDate: undefined,
-            nextActionTime: undefined,
-            lastContacted: '',
-            investmentAmount: 0,
-          } : prev)
-          setSaleAmount(0)
+          // If the trophy telephonist owns this contact (created it directly), keep the
+          // contacts table values as the starting point — they wrote those on creation.
+          // For imported pool leads owned by others, start fresh to avoid leaking
+          // regular telephonist observations into the trophy workflow.
+          const isMyOwnContact = c.ownerId === user.id
+          if (!isMyOwnContact) {
+            setContact(prev => prev ? {
+              ...prev,
+              observations: '',
+              status: 'new' as LeadStatus,
+              nextActionDate: undefined,
+              nextActionTime: undefined,
+              lastContacted: '',
+              investmentAmount: 0,
+            } : prev)
+            setSaleAmount(0)
+          } else {
+            setSaleAmount(c.investmentAmount ?? 0)
+          }
         }
         setLoading(false)
         return
@@ -234,11 +243,11 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
       if (lockedByOther) setMyRequest((accessResult.data as any) ?? null)
       else if (isMineOrAdmin) setIncomingRequests((accessResult.data as any[]) ?? [])
 
-      // Admin in trophy scope: load the most recent trophy session observations for this contact
+      // Admin in trophy scope: load the most recent trophy session observations + status
       if (isAdm && scope === 'trophy') {
         const { data: sessions } = await supabase
           .from('trophy_contact_sessions')
-          .select('observations, owner_id')
+          .select('observations, owner_id, status')
           .eq('contact_id', id)
           .order('updated_at', { ascending: false })
           .limit(1)
@@ -250,6 +259,11 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
             observations: latestSession.observations ?? '',
             ownerName: (ownerProfile as any)?.name ?? 'Trophy Τηλεφωνητής',
           })
+          // Overlay the trophy session status so the admin sees the effective status
+          // (contacts.status is 'new' for session-tracked imported leads)
+          if (latestSession.status) {
+            setContact(prev => prev ? { ...prev, status: latestSession.status as LeadStatus } : prev)
+          }
         }
       }
 
@@ -966,12 +980,12 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
                               <SelectItem value="new">{lang === 'el' ? 'Νέος' : 'New'}</SelectItem>
                               <SelectItem value="canva">Canva</SelectItem>
                               <SelectItem value="probable">{lang === 'el' ? 'Πιθανός' : 'Probable'}</SelectItem>
-                              {isTrophyMode
+                              {(isTrophyMode || scope === 'trophy')
                                 ? <SelectItem value="another_time">{lang === 'el' ? 'Άλλη Στιγμή' : 'Another Time'}</SelectItem>
                                 : <><SelectItem value="likely_sale">Sale</SelectItem><SelectItem value="likely_antisale">Antisale</SelectItem></>
                               }
-                              {isTrophyMode && <SelectItem value="few_reviews">Λίγες Αξιολογήσεις</SelectItem>}
-                              {isTrophyMode && <SelectItem value="email">Email</SelectItem>}
+                              {(isTrophyMode || scope === 'trophy') && <SelectItem value="few_reviews">Λίγες Αξιολογήσεις</SelectItem>}
+                              {(isTrophyMode || scope === 'trophy') && <SelectItem value="email">Email</SelectItem>}
                               <SelectItem value="no_answer">{lang === 'el' ? 'Δεν Απάντησε' : 'No Answer'}</SelectItem>
                               <SelectItem value="not_buying">{lang === 'el' ? 'Δεν Αγοράζει' : 'Not Buying'}</SelectItem>
                               <SelectItem value="bought">{lang === 'el' ? 'Αγόρασε' : 'Bought'}</SelectItem>
