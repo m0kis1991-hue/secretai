@@ -253,7 +253,7 @@ export default function ContactsPage() {
   const [telephonists, setTelephonists] = useState<{ id: string; name: string }[]>([])
   const [testUserIds, setTestUserIds] = useState<string[]>([])
   const [topLeadsAccess, setTopLeadsAccess] = useState(false)
-  const [trophySessions, setTrophySessions] = useState<Map<string, { status: string; nextActionDate?: string | null }>>(new Map())
+  const [trophySessions, setTrophySessions] = useState<Map<string, { status: string; nextActionDate?: string | null; nextActionTime?: string | null }>>(new Map())
   const [adminTrophyMap, setAdminTrophyMap] = useState<Map<string, string>>(new Map())
   const [totalCount, setTotalCount] = useState(0)
   const [debouncedSearch, setDebouncedSearch] = useState('')
@@ -310,16 +310,28 @@ export default function ContactsPage() {
           .order('created_at', { ascending: false })
         q = q.range(0, 1999)
       } else if (!isAdminRole(p.userRole) && p.currentUserId) {
-        // Regular telephonist: only their own contacts
-        q = q.or([
-          `and(owner_id.eq.${p.currentUserId},sale_locked.eq.true)`,
-          `and(owner_id.eq.${p.currentUserId},locked_until.gte.${today})`,
-          `and(owner_id.eq.${p.currentUserId},locked_until.is.null)`,
-          `and(created_by.eq.${p.currentUserId},owner_id.is.null)`,
-        ].join(','))
-          .order('priority_score', { ascending: false })
-        // Regular telephonists have few contacts — load all
-        q = q.range(0, 9999)
+        if (p.debouncedSearch) {
+          // Search mode: expand to the full pool but hide contacts already owned by other telephonists.
+          // Show: pool contacts (owner_id IS NULL) + own contacts (owner_id = me).
+          // Hides contacts claimed by colleagues so results are only fresh or personally-worked leads.
+          const s = p.debouncedSearch.replace(/'/g, "''")
+          q = q
+            .or(`owner_id.is.null,owner_id.eq.${p.currentUserId}`)
+            .or(`name.ilike.%${s}%,phone.ilike.%${s}%`)
+            .order('priority_score', { ascending: false })
+          q = q.range(0, 499)
+        } else {
+          // Browse mode: only their own contacts
+          q = q.or([
+            `and(owner_id.eq.${p.currentUserId},sale_locked.eq.true)`,
+            `and(owner_id.eq.${p.currentUserId},locked_until.gte.${today})`,
+            `and(owner_id.eq.${p.currentUserId},locked_until.is.null)`,
+            `and(created_by.eq.${p.currentUserId},owner_id.is.null)`,
+          ].join(','))
+            .order('priority_score', { ascending: false })
+          // Regular telephonists have few contacts — load all
+          q = q.range(0, 9999)
+        }
       } else {
         // Admin: server-side pagination + filters
         q = q.order('priority_score', { ascending: false })
@@ -443,7 +455,8 @@ export default function ContactsPage() {
         const lockedByOtherTrophy = new Set(((lockedRes as any).data ?? []).map((s: any) => s.contact_id))
         const { data, error } = contactsRes as any
         if (!error && data) {
-          const mapped = (data as any[]).map(rowToContact).filter(c => !lockedByOtherTrophy.has(c.id))
+          // Own contacts (admin-assigned) always bypass another telephonist's session lock
+          const mapped = (data as any[]).map(rowToContact).filter(c => !lockedByOtherTrophy.has(c.id) || c.ownerId === p.currentUserId)
           setContacts(mapped)
           setTotalCount(mapped.length)
         } else if (error) {
@@ -536,7 +549,7 @@ export default function ContactsPage() {
         const myId = user.id
         supabase
           .from('trophy_contact_sessions')
-          .select('contact_id, status, next_action_date, owner_id, updated_at')
+          .select('contact_id, status, next_action_date, next_action_time, owner_id, updated_at')
           .then(({ data: sessions }) => {
             const grouped = new Map<string, any[]>()
             for (const s of sessions ?? []) {
@@ -544,13 +557,17 @@ export default function ContactsPage() {
               arr.push(s)
               grouped.set(s.contact_id, arr)
             }
-            const m = new Map<string, { status: string; nextActionDate?: string | null }>()
+            const m = new Map<string, { status: string; nextActionDate?: string | null; nextActionTime?: string | null }>()
             const ownIds = new Set<string>()
             for (const [contactId, rows] of grouped) {
               const own = rows.find(s => s.owner_id === myId)
               if (own) ownIds.add(contactId)
               const best = own ?? rows.sort((a, b) => (b.updated_at ?? '').localeCompare(a.updated_at ?? ''))[0]
-              m.set(contactId, { status: best.status, nextActionDate: best.next_action_date })
+              m.set(contactId, {
+                status: best.status,
+                nextActionDate: best.next_action_date ?? null,
+                nextActionTime: best.next_action_time ? (best.next_action_time as string).slice(0, 5) : null,
+              })
             }
             myTrophyContactIds.current = ownIds
             setTrophySessions(m)
@@ -625,6 +642,13 @@ export default function ContactsPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeFilter, debouncedSearch, categoryFilter, page, view, currentUserId, userRole, topLeadsAccess, ownerScope])
 
+  // Regular telephonist: reload when search changes (search mode expands to pool; clear restores own contacts)
+  useEffect(() => {
+    if (!currentUserId || topLeadsAccess || isAdminRole(userRole)) return
+    loadContacts()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearch, currentUserId, userRole, topLeadsAccess])
+
   // Admin: auto-refresh contacts every 60 s so regular telephonist status changes appear without manual refresh
   useEffect(() => {
     if (!currentUserId || topLeadsAccess || !isAdminRole(userRole)) return
@@ -668,14 +692,14 @@ export default function ContactsPage() {
           myTrophyContactIds.current.add(row.contact_id)
           setTrophySessions(prev => {
             const next = new Map(prev)
-            next.set(row.contact_id, { status: row.status ?? 'new', nextActionDate: row.next_action_date ?? null })
+            next.set(row.contact_id, { status: row.status ?? 'new', nextActionDate: row.next_action_date ?? null, nextActionTime: row.next_action_time ? (row.next_action_time as string).slice(0, 5) : null })
             return next
           })
         } else if (!myTrophyContactIds.current.has(row.contact_id)) {
           // Another trophy telephonist changed this contact and we don't have our own session — show their status
           setTrophySessions(prev => {
             const next = new Map(prev)
-            next.set(row.contact_id, { status: row.status ?? 'new', nextActionDate: row.next_action_date ?? null })
+            next.set(row.contact_id, { status: row.status ?? 'new', nextActionDate: row.next_action_date ?? null, nextActionTime: row.next_action_time ? (row.next_action_time as string).slice(0, 5) : null })
             return next
           })
         }
@@ -685,6 +709,42 @@ export default function ContactsPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [topLeadsAccess, currentUserId])
 
+  // Trophy real-time: subscribe to contacts table so admin edits (name, phone, etc.) appear immediately.
+  useEffect(() => {
+    if (!topLeadsAccess || !currentUserId) return
+    const supabase = createClient()
+    const channel = supabase
+      .channel('trophy-contacts-sync')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'contacts' }, (payload: any) => {
+        const row = payload.new
+        if (!row?.id) return
+        setContacts(prev => {
+          const idx = prev.findIndex(c => c.id === row.id)
+          if (idx >= 0) {
+            // Contact already in state — update mutable fields
+            const next = [...prev]
+            next[idx] = { ...prev[idx],
+              name: row.name ?? prev[idx].name,
+              phone: row.phone ?? prev[idx].phone,
+              email: row.email ?? prev[idx].email,
+              ownerId: row.owner_id !== undefined ? (row.owner_id ?? null) : prev[idx].ownerId,
+              lockedUntil: row.locked_until !== undefined ? (row.locked_until ?? undefined) : prev[idx].lockedUntil,
+            }
+            return next
+          }
+          // Contact not in state — admin may have just assigned it to this user;
+          // trigger a full reload so it becomes visible with correct ownership bypass
+          if (row.owner_id === currentUserId) {
+            loadContacts()
+          }
+          return prev
+        })
+      })
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topLeadsAccess, currentUserId, loadContacts])
+
   const handleViewToggle = (v: 'table' | 'kanban') => {
     setView(v)
     localStorage.setItem('contacts-view', v)
@@ -693,11 +753,22 @@ export default function ContactsPage() {
   const isAdmin = userRole === 'admin' || userRole === 'superadmin'
   const canEdit = (contact: Contact) => topLeadsAccess || isAdmin || contact.ownerId === currentUserId || contact.ownerId === null || contact.createdBy === currentUserId
 
-  // For trophy telephonists: show their own session status in the list
-  // For admin: contact.status is already overlaid with trophy session status by loadContacts + realtime subscription
+  // For trophy telephonists: show their own session status (or another trophy's if they haven't worked it).
+  // Fall back to contact.status ONLY for contacts this telephonist owns directly (non-pool).
+  // Never inherit regular telephonist statuses set on contacts.status for pool contacts.
   const effectiveStatus = (contact: Contact): string => {
-    if (topLeadsAccess) return trophySessions.get(contact.id)?.status ?? contact.status
+    if (topLeadsAccess) {
+      const session = trophySessions.get(contact.id)
+      if (session) return session.status
+      if (contact.ownerId === currentUserId) return contact.status
+      return 'new'
+    }
     return contact.status
+  }
+
+  const effectiveNextActionTime = (contact: Contact): string | undefined => {
+    if (topLeadsAccess) return trophySessions.get(contact.id)?.nextActionTime ?? undefined
+    return contact.nextActionTime
   }
 
   // Returns the most relevant date for display: trophy session date takes precedence over contact's raw dates
@@ -768,20 +839,24 @@ export default function ContactsPage() {
           (c.industry ?? '').toLowerCase().includes(cat)
         )) return false
       }
-      // Trophy 'all' view: hide worked contacts so telephonists only see fresh leads.
-      // Specific-status filters intentionally show worked contacts in that pipeline stage.
+      // Trophy 'all'/'new' view: hide contacts worked by OTHER trophy telephonists so the
+      // telephonist only sees fresh leads + their own pipeline. Own worked contacts stay visible
+      // (hiding them caused "contact disappeared after saving" reports).
       const isGenericView = activeFilter === 'all' || activeFilter === 'new'
-      if (topLeadsAccess && isGenericView && trophySessions.has(c.id)) return false
+      // Contacts the admin explicitly assigned to this user (ownerId = currentUserId) always stay visible
+      const isOwnedByMe = c.ownerId === currentUserId
+      const workedByOther = !isOwnedByMe && trophySessions.has(c.id) && !myTrophyContactIds.current.has(c.id)
+      if (topLeadsAccess && isGenericView && workedByOther) return false
       if (!searchTerm) return true
-      // When searching, always hide worked contacts (search is for finding fresh leads)
-      if (topLeadsAccess && trophySessions.has(c.id)) return false
+      // When searching, hide contacts worked by other telephonists — search is for fresh leads.
+      if (topLeadsAccess && workedByOther) return false
       return (
         c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         parsePhonesField(c.phone || '').join(' ').includes(searchTerm)
       )
     })
     // Trophy sort is done server-side (rating DESC, review_count DESC, created_at DESC)
-  }, [contacts, searchTerm, activeFilter, categoryFilter, topLeadsAccess, trophySessions, isAdmin])
+  }, [contacts, searchTerm, activeFilter, categoryFilter, topLeadsAccess, trophySessions, isAdmin, currentUserId])
 
   // Admin: server provides total count; others: count is from filtered list
   const totalPages = Math.max(1, Math.ceil(
@@ -1086,6 +1161,7 @@ export default function ContactsPage() {
       { key: 'probable',       labelEl: 'Πιθανός',              labelEn: 'Probable' },
       { key: 'likely_sale',    labelEl: 'Sale',                 labelEn: 'Sale' },
       { key: 'likely_antisale',labelEl: 'Antisale',             labelEn: 'Antisale' },
+      { key: 'email',          labelEl: 'Email',                labelEn: 'Email' },
       { key: 'no_answer',      labelEl: 'Δεν Απάντησε',         labelEn: 'No Answer' },
       { key: 'not_buying',     labelEl: 'Δεν Αγοράζει',         labelEn: 'Not Buying' },
       { key: 'bought',         labelEl: 'Αγόρασαν',             labelEn: 'Bought' },
@@ -1314,12 +1390,15 @@ export default function ContactsPage() {
                                 <span className="text-[10px] text-amber-600 flex items-center gap-1">
                                   <Calendar className="h-3 w-3" />{formatDateShort(di.date)}
                                 </span>
-                                {contact.nextActionTime && <span className="text-[10px] text-amber-500 pl-4">{contact.nextActionTime}</span>}
+                                {effectiveNextActionTime(contact) && <span className="text-[10px] text-amber-500 pl-4">{effectiveNextActionTime(contact)}</span>}
                               </span>
                             )
                             if (di.type === 'called') return (
-                              <span className="text-[10px] text-muted-foreground flex items-center gap-1">
-                                <Phone className="h-3 w-3" />{formatDateShort(di.date)}
+                              <span className="flex flex-col gap-0">
+                                <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+                                  <Phone className="h-3 w-3" />{formatDateShort(di.date)}
+                                </span>
+                                {effectiveNextActionTime(contact) && <span className="text-[10px] text-muted-foreground pl-4">{effectiveNextActionTime(contact)}</span>}
                               </span>
                             )
                             return <span className="text-[10px] text-muted-foreground/60">{formatDateShort(di.date)}</span>
@@ -1360,7 +1439,7 @@ export default function ContactsPage() {
                         <TableHead>{lang === 'el' ? 'Κατάσταση' : 'Status'}</TableHead>
                         <TableHead>{lang === 'el' ? 'Ημερομηνία' : 'Date'}</TableHead>
                         <TableHead>{lang === 'el' ? 'Επένδυση' : 'Investment'}</TableHead>
-                        {topLeadsAccess && <TableHead className="text-center"><span className="flex items-center justify-center gap-1"><Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />{lang === 'el' ? 'Βαθμολογία' : 'Rating'}</span></TableHead>}
+                        {(topLeadsAccess || isAdmin) && <TableHead className="text-center"><span className="flex items-center justify-center gap-1"><Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />{lang === 'el' ? 'Βαθμολογία' : 'Rating'}</span></TableHead>}
                         {isAdmin && <TableHead>{lang === 'el' ? 'Τηλεφωνητής' : 'Assigned to'}</TableHead>}
                         <TableHead className="text-right">{lang === 'el' ? 'Ενέργειες' : 'Actions'}</TableHead>
                       </TableRow>
@@ -1368,7 +1447,7 @@ export default function ContactsPage() {
                     <TableBody>
                       {paginated.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={isAdmin ? 7 : topLeadsAccess ? 7 : 6} className="h-24 text-center text-muted-foreground">
+                          <TableCell colSpan={isAdmin ? 8 : topLeadsAccess ? 7 : 6} className="h-24 text-center text-muted-foreground">
                             {lang === 'el' ? 'Δεν βρέθηκαν επαφές.' : 'No contacts found.'}
                           </TableCell>
                         </TableRow>
@@ -1404,12 +1483,13 @@ export default function ContactsPage() {
                                 if (di.type === 'followup') return (
                                   <span className="flex flex-col gap-0 text-amber-600 font-medium">
                                     <span className="flex items-center gap-1"><Calendar className="h-3 w-3 shrink-0" />{formatDateShort(di.date)}</span>
-                                    {contact.nextActionTime && <span className="text-[10px] pl-4 text-amber-500">{contact.nextActionTime}</span>}
+                                    {effectiveNextActionTime(contact) && <span className="text-[10px] pl-4 text-amber-500">{effectiveNextActionTime(contact)}</span>}
                                   </span>
                                 )
                                 if (di.type === 'called') return (
-                                  <span className="flex items-center gap-1 text-muted-foreground">
-                                    <Phone className="h-3 w-3 shrink-0" />{formatDateShort(di.date)}
+                                  <span className="flex flex-col gap-0 text-muted-foreground">
+                                    <span className="flex items-center gap-1"><Phone className="h-3 w-3 shrink-0" />{formatDateShort(di.date)}</span>
+                                    {effectiveNextActionTime(contact) && <span className="text-[10px] pl-4">{effectiveNextActionTime(contact)}</span>}
                                   </span>
                                 )
                                 return <span className="text-muted-foreground/60">{formatDateShort(di.date)}</span>
@@ -1418,7 +1498,7 @@ export default function ContactsPage() {
                             <TableCell className="text-xs">
                               {contact.investmentAmount > 0 ? `€${contact.investmentAmount.toLocaleString()}` : "—"}
                             </TableCell>
-                            {topLeadsAccess && (
+                            {(topLeadsAccess || isAdmin) && (
                               <TableCell className="text-center">
                                 {contact.rating != null ? (
                                   <div className="flex flex-col items-center gap-1">
