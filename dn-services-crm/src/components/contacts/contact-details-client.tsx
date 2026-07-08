@@ -349,7 +349,9 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
     const isSaver = isAdmin || isOwner || isCreator || isUnclaimed
     const isBuying = contact.status === 'bought'
     const tenDaysFromNow = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
-    const newLockedUntil = isBuying ? '2099-12-31' : (isSaver || shouldClaim ? tenDaysFromNow : undefined)
+    // Admin: only touch locked_until when marking as bought (permanent lock). Never reset a
+    // telephonist's active lock — admin edits content only, lock metadata belongs to the owner.
+    const newLockedUntil = isBuying ? '2099-12-31' : (isAdmin ? undefined : (isSaver || shouldClaim ? tenDaysFromNow : undefined))
     const newSaleLocked = isBuying ? true : (contact.saleLocked ? true : undefined)
 
     const row: any = {
