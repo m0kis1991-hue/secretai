@@ -255,6 +255,7 @@ export default function ContactsPage() {
   const [topLeadsAccess, setTopLeadsAccess] = useState(false)
   const [trophySessions, setTrophySessions] = useState<Map<string, { status: string; nextActionDate?: string | null; nextActionTime?: string | null }>>(new Map())
   const [adminTrophyMap, setAdminTrophyMap] = useState<Map<string, string>>(new Map())
+  const [adminTrophyOwnerMap, setAdminTrophyOwnerMap] = useState<Map<string, string>>(new Map())
   const [totalCount, setTotalCount] = useState(0)
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [ownerScope, setOwnerScope] = useState<'all' | 'trophy' | 'regular'>(() => {
@@ -308,7 +309,14 @@ export default function ContactsPage() {
         q = (q as any)
           .order('rating', { ascending: false, nullsFirst: false })
           .order('created_at', { ascending: false })
-        q = q.range(0, 1999)
+        // Search mode: filter by name/phone server-side, smaller range to stay responsive
+        if (p.debouncedSearch) {
+          const s = p.debouncedSearch.replace(/'/g, "''")
+          q = q.or(`name.ilike.%${s}%,phone.ilike.%${s}%`)
+          q = q.range(0, 499)
+        } else {
+          q = q.range(0, 1999)
+        }
       } else if (!isAdminRole(p.userRole) && p.currentUserId) {
         if (p.debouncedSearch) {
           // Search mode: expand to the full pool but hide contacts already owned by other telephonists.
@@ -435,8 +443,23 @@ export default function ContactsPage() {
       }
 
       if (p.topLeadsAccess) {
-        // Trophy: run contacts query + "locked by other trophy" query in parallel
-        const [lockedRes, rawRes] = await Promise.all([
+        // Own-contacts query: trophy telephonists may have 1000+ assigned contacts that fall
+        // outside the top-2000 rating sort. Fetch them separately and merge so they're always visible.
+        const ownCols = `${CONTACT_BASE_COLUMNS},rating,review_count`
+        let ownQ: any = supabase
+          .from('contacts')
+          .select(ownCols)
+          .eq('owner_id', p.currentUserId)
+          .or('sale_locked.is.false,sale_locked.is.null')
+          .order('rating', { ascending: false, nullsFirst: false })
+          .order('created_at', { ascending: false })
+        if (p.debouncedSearch) {
+          const s = p.debouncedSearch.replace(/'/g, "''")
+          ownQ = ownQ.or(`name.ilike.%${s}%,phone.ilike.%${s}%`)
+        }
+
+        // Trophy: run pool query + "locked by other trophy" query + own-contacts query in parallel
+        const [lockedRes, rawRes, ownRes] = await Promise.all([
           supabase
             .from('trophy_contact_sessions')
             .select('contact_id')
@@ -444,6 +467,7 @@ export default function ContactsPage() {
             .not('locked_until', 'is', null)
             .gte('locked_until', today),
           buildQuery(true),
+          ownQ,
         ])
         // Fallback if rating columns missing
         let contactsRes = rawRes
@@ -454,11 +478,16 @@ export default function ContactsPage() {
         if (myId !== loadIdRef.current) return
         const lockedByOtherTrophy = new Set(((lockedRes as any).data ?? []).map((s: any) => s.contact_id))
         const { data, error } = contactsRes as any
+        const { data: ownData } = ownRes as any
         if (!error && data) {
           // Own contacts (admin-assigned) always bypass another telephonist's session lock
-          const mapped = (data as any[]).map(rowToContact).filter(c => !lockedByOtherTrophy.has(c.id) || c.ownerId === p.currentUserId)
-          setContacts(mapped)
-          setTotalCount(mapped.length)
+          const poolContacts = (data as any[]).map(rowToContact).filter(c => !lockedByOtherTrophy.has(c.id) || c.ownerId === p.currentUserId)
+          // Merge in own contacts that are outside the top-2000 pool (ΔΗΜΗΤΡΗΣ scenario)
+          const ownContacts = ((ownData ?? []) as any[]).map(rowToContact)
+          const seenIds = new Set(poolContacts.map(c => c.id))
+          const merged = [...poolContacts, ...ownContacts.filter(c => !seenIds.has(c.id))]
+          setContacts(merged)
+          setTotalCount(merged.length)
         } else if (error) {
           console.error('[loadContacts] trophy failed:', error.message)
         }
@@ -485,16 +514,21 @@ export default function ContactsPage() {
           if (isAdminRole(p.userRole) && visible.length > 0) {
             const { data: troData } = await supabase
               .from('trophy_contact_sessions')
-              .select('contact_id, status, updated_at')
+              .select('contact_id, status, owner_id, updated_at')
               .in('contact_id', visible.map(c => c.id))
               .order('updated_at', { ascending: false })
             if (myId !== loadIdRef.current) return
             const tMap = new Map<string, string>()
+            const ownerMap = new Map<string, string>()
             for (const s of troData ?? []) {
-              if (!tMap.has(s.contact_id)) tMap.set(s.contact_id, s.status)
+              if (!tMap.has(s.contact_id)) {
+                tMap.set(s.contact_id, s.status)
+                ownerMap.set(s.contact_id, s.owner_id)
+              }
             }
             if (tMap.size > 0) {
               setAdminTrophyMap(prev => { const next = new Map(prev); tMap.forEach((st, cid) => next.set(cid, st)); return next })
+              setAdminTrophyOwnerMap(prev => { const next = new Map(prev); ownerMap.forEach((oid, cid) => next.set(cid, oid)); return next })
             }
             setContacts(visible.map(c => tMap.has(c.id) ? { ...c, status: tMap.get(c.id)! as LeadStatus } : c))
           } else {
@@ -585,16 +619,22 @@ export default function ContactsPage() {
         const filtered = allTels.filter(t => role === 'superadmin' || !TEST_EMAILS.includes(t.email))
         setTelephonists(filtered.map(({ id, name }) => ({ id, name })))
         trophyUserIdsRef.current = (trophyProfiles ?? []).map((p: any) => p.id)
-        // Load all trophy sessions so admin can see what trophy telephonists have done to each contact
+        // Load all trophy sessions so admin can see what trophy telephonists have done to each contact.
+        // Also track owner_id per contact so admin's status change updates the right session.
         supabase.from('trophy_contact_sessions')
-          .select('contact_id, status, updated_at')
+          .select('contact_id, status, owner_id, updated_at')
           .order('updated_at', { ascending: false })
           .then(({ data: sessions }) => {
             const m = new Map<string, string>()
+            const ownerM = new Map<string, string>()
             for (const s of sessions ?? []) {
-              if (!m.has(s.contact_id)) m.set(s.contact_id, s.status)
+              if (!m.has(s.contact_id)) {
+                m.set(s.contact_id, s.status)
+                ownerM.set(s.contact_id, s.owner_id)
+              }
             }
             setAdminTrophyMap(m)
+            setAdminTrophyOwnerMap(ownerM)
           })
         if (role !== 'superadmin') {
           resolvedTestIds = allTels.filter(t => TEST_EMAILS.includes(t.email)).map(t => t.id)
@@ -833,10 +873,14 @@ export default function ContactsPage() {
     // so that when a trophy telephonist changes status (realtime update hits contacts state),
     // the contact immediately leaves the old filter category without waiting for a server reload.
     if (isAdmin && !topLeadsAccess) {
-      // Kanban loads all statuses; skip client-side filter so all columns show correctly
-      const isTrophyStatusFilter = view !== 'kanban' && ownerScope === 'trophy' &&
+      // Kanban shows all statuses in columns — no client-side filter needed.
+      // For all other status filters: the server query loads contacts based on contacts.status or
+      // trophy session IDs, but the trophy session overlay may have changed c.status to a different
+      // value. Apply a client-side re-check so only contacts matching the active filter are shown.
+      // This applies across ALL owner scopes (all / trophy / regular) to keep results consistent.
+      const isStatusFilter = view !== 'kanban' &&
         activeFilter !== 'all' && activeFilter !== 'high' && activeFilter !== 'today'
-      if (isTrophyStatusFilter) {
+      if (isStatusFilter) {
         return contacts.filter(c => {
           const st = c.status as string
           if (activeFilter === 'likely_sale') return st === 'likely_sale' || st === 'likely_antisale'
@@ -898,23 +942,55 @@ export default function ContactsPage() {
   const handleStatusChange = async (id: string, status: LeadStatus) => {
     const supabase = createClient()
     if (topLeadsAccess && currentUserId) {
+      // Trophy telephonist: always writes to their own session
       const { error } = await supabase
         .from('trophy_contact_sessions')
         .upsert({ contact_id: id, owner_id: currentUserId, status, updated_at: new Date().toISOString() }, { onConflict: 'contact_id,owner_id' })
-      if (!error) {
-        myTrophyContactIds.current.add(id)
-        setTrophySessions(prev => {
-          const next = new Map(prev)
-          const existing = next.get(id) ?? {}
-          next.set(id, { ...existing, status })
-          return next
+      if (error) {
+        toast({ variant: 'destructive', title: lang === 'el' ? 'Σφάλμα αλλαγής κατάστασης' : 'Status change error' })
+        return
+      }
+      myTrophyContactIds.current.add(id)
+      setTrophySessions(prev => {
+        const next = new Map(prev)
+        const existing = next.get(id) ?? {}
+        next.set(id, { ...existing, status })
+        return next
+      })
+      setContacts(prev => prev.map(c => c.id === id ? { ...c, status } : c))
+    } else if (isAdmin && ownerScope === 'trophy') {
+      // Admin in trophy scope: if the contact has a trophy session, patch the session so the
+      // trophy telephonist sees the change in real-time. Otherwise fall back to contacts.status.
+      const sessionOwnerId = adminTrophyOwnerMap.get(id)
+      if (sessionOwnerId) {
+        const { data: { session } } = await supabase.auth.getSession()
+        const accessToken = session?.access_token ?? ''
+        const res = await fetch('/api/contacts/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) },
+          body: JSON.stringify({ isNew: false, contactId: id, userId: currentUserId, row: {}, trophySync: { ownerId: sessionOwnerId, status } }),
         })
+        if (!res.ok) {
+          const json = await res.json().catch(() => ({}))
+          toast({ variant: 'destructive', title: lang === 'el' ? 'Σφάλμα αλλαγής κατάστασης' : 'Status change error', description: json?.error })
+          return
+        }
+      } else {
+        const { error } = await supabase.from('contacts').update({ status }).eq('id', id)
+        if (error) {
+          toast({ variant: 'destructive', title: lang === 'el' ? 'Σφάλμα αλλαγής κατάστασης' : 'Status change error' })
+          return
+        }
       }
+      setContacts(prev => prev.map(c => c.id === id ? { ...c, status } : c))
     } else {
+      // Regular admin (non-trophy scope) or regular telephonist
       const { error } = await supabase.from('contacts').update({ status }).eq('id', id)
-      if (!error) {
-        setContacts(prev => prev.map(c => c.id === id ? { ...c, status } : c))
+      if (error) {
+        toast({ variant: 'destructive', title: lang === 'el' ? 'Σφάλμα αλλαγής κατάστασης' : 'Status change error' })
+        return
       }
+      setContacts(prev => prev.map(c => c.id === id ? { ...c, status } : c))
     }
   }
 

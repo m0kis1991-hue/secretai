@@ -115,6 +115,7 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
   const [ownerName, setOwnerName] = useState<string | null>(null)
   const [isTrophyMode, setIsTrophyMode] = useState(false)
   const [trophySessionId, setTrophySessionId] = useState<string | null>(null)
+  const [trophySessionOwnerId, setTrophySessionOwnerId] = useState<string | null>(null)
   const [myRequest, setMyRequest] = useState<{ id: string; status: string } | null>(null)
   const [incomingRequests, setIncomingRequests] = useState<AccessRequest[]>([])
   const [isRequesting, setIsRequesting] = useState(false)
@@ -255,6 +256,7 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
         if (latestSession) {
           const { data: ownerProfile } = await supabase
             .from('profiles').select('name').eq('id', latestSession.owner_id).single()
+          setTrophySessionOwnerId(latestSession.owner_id ?? null)
           setTrophyObs({
             observations: latestSession.observations ?? '',
             ownerName: (ownerProfile as any)?.name ?? 'Trophy Τηλεφωνητής',
@@ -296,7 +298,7 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
 
     // Trophy telephonist: save to their own session, never touch the contacts table
     if (isTrophyMode && id !== 'new' && currentUserId) {
-      const tenDaysFromNow = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+      const twoDaysFromNow = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
       const sessionRow = {
         contact_id: contact.id,
         owner_id: currentUserId,
@@ -306,7 +308,7 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
         next_action_time: contact.nextActionTime || null,
         last_contacted: contact.lastContacted || null,
         investment_amount: saleAmount || 0,
-        locked_until: tenDaysFromNow,
+        locked_until: twoDaysFromNow,
         updated_at: new Date().toISOString(),
       }
       const { data: saved, error } = await supabase
@@ -354,6 +356,13 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
     const newLockedUntil = isBuying ? '2099-12-31' : (isAdmin ? undefined : (isSaver || shouldClaim ? tenDaysFromNow : undefined))
     const newSaleLocked = isBuying ? true : (contact.saleLocked ? true : undefined)
 
+    // When admin edits a trophy-scope contact that has a session, contact.status was overlaid
+    // with the trophy session status in init(). Writing that back to contacts.status would
+    // corrupt pool contacts (they should stay 'new' in the contacts table). Status change is
+    // sent separately via trophySync which patches trophy_contact_sessions directly.
+    // For trophy-scope contacts WITHOUT a session (e.g. ΔΗΜΗΤΡΗΣ's own assigned contacts),
+    // contacts.status is the authoritative field so we write normally.
+    const trophyScopeWithSession = isAdmin && scope === 'trophy' && !!trophySessionOwnerId
     const row: any = {
       name: contact.name,
       phone: effectivePhone,
@@ -364,8 +373,8 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
       job_title: contact.jobTitle || null,
       observations: contact.observations || null,
       investment_amount: isSaver ? (saleAmount || 0) : undefined,
-      status: contact.status,
-      owner_id: shouldClaim ? currentUserId : (contact.ownerId ?? null),
+      status: trophyScopeWithSession ? undefined : contact.status,
+      owner_id: shouldClaim ? currentUserId : (isAdmin ? undefined : (contact.ownerId ?? null)),
       priority_score: contact.priorityScore,
       next_action_date: contact.nextActionDate?.slice(0, 10) || null,
       next_action_time: contact.nextActionTime || null,
@@ -427,7 +436,17 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
     const res = await fetch('/api/contacts/save', {
       method: 'POST',
       headers: authHeaders,
-      body: JSON.stringify({ isNew: false, userId: currentUserId, contactId: contact.id, row }),
+      body: JSON.stringify({
+          isNew: false,
+          userId: currentUserId,
+          contactId: contact.id,
+          row,
+          // If admin is in trophy scope and a session exists, sync the new status to that
+          // session so the trophy telephonist sees the change in real-time via their subscription.
+          ...(isAdmin && scope === 'trophy' && trophySessionOwnerId
+            ? { trophySync: { ownerId: trophySessionOwnerId, status: contact.status } }
+            : {}),
+        }),
     })
     const saveJson = await res.json()
     if (!res.ok) {
@@ -579,7 +598,7 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
             contact_id: contact.id,
             owner_id: currentUserId,
             last_contacted: today,
-            locked_until: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+            locked_until: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
             updated_at: new Date().toISOString(),
           }, { onConflict: 'contact_id,owner_id' }),
         ]).then(() => {
@@ -987,7 +1006,7 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
                                 : <><SelectItem value="likely_sale">Sale</SelectItem><SelectItem value="likely_antisale">Antisale</SelectItem></>
                               }
                               {(isTrophyMode || scope === 'trophy') && <SelectItem value="few_reviews">Λίγες Αξιολογήσεις</SelectItem>}
-                              {(isTrophyMode || scope === 'trophy') && <SelectItem value="email">Email</SelectItem>}
+                              <SelectItem value="email">Email</SelectItem>
                               <SelectItem value="no_answer">{lang === 'el' ? 'Δεν Απάντησε' : 'No Answer'}</SelectItem>
                               <SelectItem value="not_buying">{lang === 'el' ? 'Δεν Αγοράζει' : 'Not Buying'}</SelectItem>
                               <SelectItem value="bought">{lang === 'el' ? 'Αγόρασε' : 'Bought'}</SelectItem>
