@@ -517,6 +517,7 @@ export default function ContactsPage() {
               .select('contact_id, status, owner_id, updated_at')
               .in('contact_id', visible.map(c => c.id))
               .order('updated_at', { ascending: false })
+              .range(0, Math.max(4999, visible.length * 5 - 1))
             if (myId !== loadIdRef.current) return
             const tMap = new Map<string, string>()
             const ownerMap = new Map<string, string>()
@@ -581,31 +582,34 @@ export default function ContactsPage() {
       // Priority: current user's own session first, then most-recently-updated session from any other.
       if (tla && user.id) {
         const myId = user.id
-        supabase
+        // Await sessions BEFORE loadContacts so effectiveStatus is correct from the first render.
+        // Use range(0,9999) — Supabase caps unranged queries at 1000 rows; without this, sessions
+        // beyond row 1000 are silently dropped and effectiveStatus falls back to stale contacts.status.
+        const { data: sessions } = await supabase
           .from('trophy_contact_sessions')
           .select('contact_id, status, next_action_date, next_action_time, owner_id, updated_at')
-          .then(({ data: sessions }) => {
-            const grouped = new Map<string, any[]>()
-            for (const s of sessions ?? []) {
-              const arr = grouped.get(s.contact_id) ?? []
-              arr.push(s)
-              grouped.set(s.contact_id, arr)
-            }
-            const m = new Map<string, { status: string; nextActionDate?: string | null; nextActionTime?: string | null }>()
-            const ownIds = new Set<string>()
-            for (const [contactId, rows] of grouped) {
-              const own = rows.find(s => s.owner_id === myId)
-              if (own) ownIds.add(contactId)
-              const best = own ?? rows.sort((a, b) => (b.updated_at ?? '').localeCompare(a.updated_at ?? ''))[0]
-              m.set(contactId, {
-                status: best.status,
-                nextActionDate: best.next_action_date ?? null,
-                nextActionTime: best.next_action_time ? (best.next_action_time as string).slice(0, 5) : null,
-              })
-            }
-            myTrophyContactIds.current = ownIds
-            setTrophySessions(m)
+          .order('updated_at', { ascending: false })
+          .range(0, 9999)
+        const grouped = new Map<string, any[]>()
+        for (const s of sessions ?? []) {
+          const arr = grouped.get(s.contact_id) ?? []
+          arr.push(s)
+          grouped.set(s.contact_id, arr)
+        }
+        const m = new Map<string, { status: string; nextActionDate?: string | null; nextActionTime?: string | null }>()
+        const ownIds = new Set<string>()
+        for (const [contactId, rows] of grouped) {
+          const own = rows.find(s => s.owner_id === myId)
+          if (own) ownIds.add(contactId)
+          const best = own ?? rows.sort((a, b) => (b.updated_at ?? '').localeCompare(a.updated_at ?? ''))[0]
+          m.set(contactId, {
+            status: best.status,
+            nextActionDate: best.next_action_date ?? null,
+            nextActionTime: best.next_action_time ? (best.next_action_time as string).slice(0, 5) : null,
           })
+        }
+        myTrophyContactIds.current = ownIds
+        setTrophySessions(m)
       }
       // Load telephonist list for admin reassignment + resolve test IDs + trophy user IDs
       const TEST_EMAILS = ['m0kis1991@gmail.com', 'm0kis@hotmail.com']
@@ -624,6 +628,7 @@ export default function ContactsPage() {
         supabase.from('trophy_contact_sessions')
           .select('contact_id, status, owner_id, updated_at')
           .order('updated_at', { ascending: false })
+          .range(0, 9999)
           .then(({ data: sessions }) => {
             const m = new Map<string, string>()
             const ownerM = new Map<string, string>()
@@ -784,6 +789,26 @@ export default function ContactsPage() {
     return () => { supabase.removeChannel(channel) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [topLeadsAccess, currentUserId, loadContacts])
+
+  // Trophy stamp: after trophySessions loads (or updates via real-time), write the session
+  // status into c.status so contacts.status and trophySessions stay in sync. This prevents any
+  // remaining race-condition window where contacts loaded before sessions and c.status is stale.
+  useEffect(() => {
+    if (!topLeadsAccess || trophySessions.size === 0) return
+    setContacts(prev => {
+      let changed = false
+      const next = prev.map(c => {
+        const session = trophySessions.get(c.id)
+        if (session && (c.status as string) !== session.status) {
+          changed = true
+          return { ...c, status: session.status as LeadStatus }
+        }
+        return c
+      })
+      return changed ? next : prev
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topLeadsAccess, trophySessions])
 
   const handleViewToggle = (v: 'table' | 'kanban') => {
     setView(v)
