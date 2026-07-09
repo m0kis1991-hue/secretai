@@ -32,8 +32,12 @@ import { cn } from "@/lib/utils"
 
 // ── Multi-phone helpers ───────────────────────────────────────────────────────
 
+// Compare on the last 10 digits so "6912345678" still matches "+30 691 234 5678"
+// or "0030-691-234-5678" — country-code/formatting differences were letting
+// already-saved contacts slip past duplicate detection.
 function normalizePhone(p: string): string {
-  return p.replace(/[\s\-\(\)]/g, '')
+  const digits = p.replace(/\D/g, '')
+  return digits.length > 10 ? digits.slice(-10) : digits
 }
 
 // Build a Map<normalizedPhone → contactName> from all contacts (handles JSON array phones)
