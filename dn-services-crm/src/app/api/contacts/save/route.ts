@@ -117,13 +117,29 @@ export async function POST(request: NextRequest) {
     }
 
     // Helper: sync trophy session status so the telephonist sees admin's change in real-time.
+    // Upsert (not PATCH) — a PATCH silently updates zero rows when this contact has never had
+    // a session for that owner yet, which made admin's status change invisible to the trophy
+    // telephonist forever (no session row to override the 'new' fallback in their own view).
     // Returns an error string on failure, null on success/skip.
     const syncTrophySession = async (): Promise<string | null> => {
       if (!isAdm || !trophySync?.ownerId || !trophySync?.status) return null
-      const res = await adminWrite(
-        `trophy_contact_sessions?contact_id=eq.${contactId}&owner_id=eq.${trophySync.ownerId}`,
-        'PATCH',
-        { status: trophySync.status, updated_at: new Date().toISOString() }
+      const res = await safeFetch(
+        `${SUPABASE_URL}/rest/v1/trophy_contact_sessions?on_conflict=contact_id,owner_id`,
+        {
+          method: 'POST',
+          headers: {
+            apikey: SERVICE_KEY,
+            Authorization: `Bearer ${SERVICE_KEY}`,
+            'Content-Type': 'application/json',
+            Prefer: 'resolution=merge-duplicates,return=minimal',
+          },
+          body: JSON.stringify({
+            contact_id: contactId,
+            owner_id: trophySync.ownerId,
+            status: trophySync.status,
+            updated_at: new Date().toISOString(),
+          }),
+        }
       )
       if (!res.ok) {
         console.error('[syncTrophySession] failed:', JSON.stringify(res.data))

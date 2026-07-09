@@ -356,13 +356,15 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
     const newLockedUntil = isBuying ? '2099-12-31' : (isAdmin ? undefined : (isSaver || shouldClaim ? tenDaysFromNow : undefined))
     const newSaleLocked = isBuying ? true : (contact.saleLocked ? true : undefined)
 
-    // When admin edits a trophy-scope contact that has a session, contact.status was overlaid
-    // with the trophy session status in init(). Writing that back to contacts.status would
-    // corrupt pool contacts (they should stay 'new' in the contacts table). Status change is
-    // sent separately via trophySync which patches trophy_contact_sessions directly.
-    // For trophy-scope contacts WITHOUT a session (e.g. ΔΗΜΗΤΡΗΣ's own assigned contacts),
-    // contacts.status is the authoritative field so we write normally.
-    const trophyScopeWithSession = isAdmin && scope === 'trophy' && !!trophySessionOwnerId
+    // Admin editing a trophy-scope contact: status always goes through trophy_contact_sessions
+    // (trophySync below), never contacts.status. Trophy telephonists' own view ignores raw
+    // contacts.status for pool contacts (to avoid inheriting stale/foreign statuses), so a
+    // direct write here would be saved but permanently invisible to them. Attribute the sync
+    // to the existing session's owner if there is one, else the contact's own owner (if it's a
+    // trophy telephonist), else admin's own id — trophySync upserts, so this always lands
+    // somewhere the telephonists' "most recent session" lookup will pick up.
+    const trophyScopeSync = isAdmin && scope === 'trophy'
+    const trophySyncOwnerId = trophySessionOwnerId ?? contact.ownerId ?? currentUserId
     const row: any = {
       name: contact.name,
       phone: effectivePhone,
@@ -373,7 +375,7 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
       job_title: contact.jobTitle || null,
       observations: contact.observations || null,
       investment_amount: isSaver ? (saleAmount || 0) : undefined,
-      status: trophyScopeWithSession ? undefined : contact.status,
+      status: trophyScopeSync ? undefined : contact.status,
       owner_id: shouldClaim ? currentUserId : (isAdmin ? undefined : (contact.ownerId ?? null)),
       priority_score: contact.priorityScore,
       next_action_date: contact.nextActionDate?.slice(0, 10) || null,
@@ -441,10 +443,10 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
           userId: currentUserId,
           contactId: contact.id,
           row,
-          // If admin is in trophy scope and a session exists, sync the new status to that
-          // session so the trophy telephonist sees the change in real-time via their subscription.
-          ...(isAdmin && scope === 'trophy' && trophySessionOwnerId
-            ? { trophySync: { ownerId: trophySessionOwnerId, status: contact.status } }
+          // Admin in trophy scope: sync the new status into trophy_contact_sessions (upserted
+          // server-side) so the trophy telephonist sees the change via their subscription.
+          ...(trophyScopeSync
+            ? { trophySync: { ownerId: trophySyncOwnerId, status: contact.status } }
             : {}),
         }),
     })

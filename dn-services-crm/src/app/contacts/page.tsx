@@ -1027,28 +1027,24 @@ export default function ContactsPage() {
       })
       setContacts(prev => prev.map(c => c.id === id ? { ...c, status } : c))
     } else if (isAdmin && ownerScope === 'trophy') {
-      // Admin in trophy scope: if the contact has a trophy session, patch the session so the
-      // trophy telephonist sees the change in real-time. Otherwise fall back to contacts.status.
-      const sessionOwnerId = adminTrophyOwnerMap.get(id)
-      if (sessionOwnerId) {
-        const { data: { session } } = await supabase.auth.getSession()
-        const accessToken = session?.access_token ?? ''
-        const res = await fetch('/api/contacts/save', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) },
-          body: JSON.stringify({ isNew: false, contactId: id, userId: currentUserId, row: {}, trophySync: { ownerId: sessionOwnerId, status } }),
-        })
-        if (!res.ok) {
-          const json = await res.json().catch(() => ({}))
-          toast({ variant: 'destructive', title: lang === 'el' ? 'Σφάλμα αλλαγής κατάστασης' : 'Status change error', description: json?.error })
-          return
-        }
-      } else {
-        const { error } = await supabase.from('contacts').update({ status }).eq('id', id)
-        if (error) {
-          toast({ variant: 'destructive', title: lang === 'el' ? 'Σφάλμα αλλαγής κατάστασης' : 'Status change error' })
-          return
-        }
+      // Admin in trophy scope: always sync via trophySync (server-side upsert), never write
+      // contacts.status directly — trophy telephonists' own view ignores raw contacts.status for
+      // pool contacts, so a direct write here would silently be invisible to them forever.
+      // Attribute the session to its existing owner if there is one, else the contact's own
+      // owner (if a trophy telephonist), else admin's own id — upsert lands it either way.
+      const targetContact = contacts.find(c => c.id === id)
+      const sessionOwnerId = adminTrophyOwnerMap.get(id) ?? targetContact?.ownerId ?? currentUserId
+      const { data: { session } } = await supabase.auth.getSession()
+      const accessToken = session?.access_token ?? ''
+      const res = await fetch('/api/contacts/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) },
+        body: JSON.stringify({ isNew: false, contactId: id, userId: currentUserId, row: {}, trophySync: { ownerId: sessionOwnerId, status } }),
+      })
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}))
+        toast({ variant: 'destructive', title: lang === 'el' ? 'Σφάλμα αλλαγής κατάστασης' : 'Status change error', description: json?.error })
+        return
       }
       setContacts(prev => prev.map(c => c.id === id ? { ...c, status } : c))
     } else {
