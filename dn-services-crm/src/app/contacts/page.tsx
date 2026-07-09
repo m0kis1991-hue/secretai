@@ -1316,8 +1316,6 @@ export default function ContactsPage() {
       { key: 'new',            labelEl: 'Νέοι',                 labelEn: 'New' },
       { key: 'canva',          labelEl: 'Canva',                labelEn: 'Canva' },
       { key: 'probable',       labelEl: 'Πιθανός',              labelEn: 'Probable' },
-      { key: 'likely_sale',    labelEl: 'Sale',                 labelEn: 'Sale' },
-      { key: 'likely_antisale',labelEl: 'Antisale',             labelEn: 'Antisale' },
       { key: 'email',          labelEl: 'Email',                labelEn: 'Email' },
       { key: 'no_answer',      labelEl: 'Δεν Απάντησε',         labelEn: 'No Answer' },
       { key: 'not_buying',     labelEl: 'Δεν Αγοράζει',         labelEn: 'Not Buying' },
