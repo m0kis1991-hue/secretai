@@ -715,11 +715,46 @@ export default function ContactsPage() {
         setContacts(prev => prev.map(c =>
           c.id === row.contact_id ? { ...c, status: row.status } : c
         ))
+        // Keep the session map (date/time) in sync too, so the trophy-scope date/time column stays live
+        setTrophySessions(prev => {
+          const next = new Map(prev)
+          next.set(row.contact_id, {
+            status: row.status,
+            nextActionDate: row.next_action_date ?? null,
+            nextActionTime: row.next_action_time ? (row.next_action_time as string).slice(0, 5) : null,
+          })
+          return next
+        })
       })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUserId, userRole, topLeadsAccess])
+
+  // Admin (trophy scope): load the full trophy session map (status + follow-up date/time) so the
+  // same amber date/time treatment trophy telephonists see on their own view renders here too.
+  useEffect(() => {
+    if (!currentUserId || !isAdminRole(userRole) || ownerScope !== 'trophy') return
+    const supabase = createClient()
+    supabase
+      .from('trophy_contact_sessions')
+      .select('contact_id, status, next_action_date, next_action_time, updated_at')
+      .order('updated_at', { ascending: false })
+      .range(0, 9999)
+      .then(({ data: sessions }) => {
+        const m = new Map<string, { status: string; nextActionDate?: string | null; nextActionTime?: string | null }>()
+        for (const s of sessions ?? []) {
+          if (m.has(s.contact_id)) continue // already ordered by updated_at desc — first hit wins
+          m.set(s.contact_id, {
+            status: s.status,
+            nextActionDate: s.next_action_date ?? null,
+            nextActionTime: s.next_action_time ? (s.next_action_time as string).slice(0, 5) : null,
+          })
+        }
+        setTrophySessions(m)
+      })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUserId, userRole, ownerScope])
 
   // Trophy real-time: subscribe to ALL trophy_contact_sessions changes so every trophy
   // telephonist sees status updates from colleagues without refreshing.
@@ -816,6 +851,10 @@ export default function ContactsPage() {
   }
 
   const isAdmin = userRole === 'admin' || userRole === 'superadmin'
+  // Admin browsing the trophy pool: trophy telephonists store their follow-up date/time on
+  // trophy_contact_sessions (not on the contacts row), so admin needs the same session-aware
+  // lookups a trophy telephonist gets on their own view — see trophySessions load effect below.
+  const isAdminTrophyView = isAdmin && ownerScope === 'trophy'
   const canEdit = (contact: Contact) => topLeadsAccess || isAdmin || contact.ownerId === currentUserId || contact.ownerId === null || contact.createdBy === currentUserId
 
   // For trophy telephonists: show their own session status (or another trophy's if they haven't worked it).
@@ -832,13 +871,13 @@ export default function ContactsPage() {
   }
 
   const effectiveNextActionTime = (contact: Contact): string | undefined => {
-    if (topLeadsAccess) return trophySessions.get(contact.id)?.nextActionTime ?? undefined
+    if (topLeadsAccess || isAdminTrophyView) return trophySessions.get(contact.id)?.nextActionTime ?? undefined
     return contact.nextActionTime
   }
 
   // Returns the most relevant date for display: trophy session date takes precedence over contact's raw dates
   const effectiveContactDate = (contact: Contact): ContactDateInfo | null => {
-    if (topLeadsAccess) {
+    if (topLeadsAccess || isAdminTrophyView) {
       const session = trophySessions.get(contact.id)
       if (session?.nextActionDate) return { date: session.nextActionDate.slice(0, 10), type: 'followup' }
     }
@@ -847,7 +886,7 @@ export default function ContactsPage() {
 
   // True if this contact has a follow-up scheduled for today (trophy-aware)
   const isFollowupToday = (contact: Contact): boolean => {
-    const nextDate = topLeadsAccess
+    const nextDate = (topLeadsAccess || isAdminTrophyView)
       ? (trophySessions.get(contact.id)?.nextActionDate ?? contact.nextActionDate)
       : contact.nextActionDate
     return nextDate === todayISO()
@@ -878,9 +917,9 @@ export default function ContactsPage() {
   }
 
   const todayCount = useMemo(() => contacts.filter(c => {
-    const nextDate = topLeadsAccess ? (trophySessions.get(c.id)?.nextActionDate ?? c.nextActionDate) : c.nextActionDate
+    const nextDate = (topLeadsAccess || isAdminTrophyView) ? (trophySessions.get(c.id)?.nextActionDate ?? c.nextActionDate) : c.nextActionDate
     return nextDate === todayISO()
-  }).length, [contacts, topLeadsAccess, trophySessions])
+  }).length, [contacts, topLeadsAccess, isAdminTrophyView, trophySessions])
 
   // Distinct categories derived from contacts (jobTitle + industry)
   const categoryOptions = useMemo(() => {

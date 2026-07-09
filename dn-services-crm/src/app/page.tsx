@@ -489,24 +489,66 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const sc = createClient()
-    sc.from('contacts')
-      .select('id, name, phone, next_action_date, next_action_time, status, owner_id, profiles!owner_id(name)')
-      .not('next_action_date', 'is', null)
-      .not('status', 'in', '(bought,not_buying)')
-      .order('next_action_date', { ascending: true })
-      .limit(300)
-      .then(({ data }) => {
-        if (!data) return
-        setAllFollowUps(data.map((r: any) => ({
-          id: r.id,
-          name: r.name ?? '',
-          phone: r.phone ?? '',
-          next_action_date: r.next_action_date,
-          next_action_time: r.next_action_time ? String(r.next_action_time).slice(0, 5) : undefined,
-          ownerName: r.profiles?.name ?? '—',
-          status: r.status ?? 'new',
-        })))
-      })
+    Promise.all([
+      sc.from('contacts')
+        .select('id, name, phone, next_action_date, next_action_time, status, owner_id, profiles!owner_id(name)')
+        .not('next_action_date', 'is', null)
+        .not('status', 'in', '(bought,not_buying)')
+        .order('next_action_date', { ascending: true })
+        .limit(300),
+      // Trophy telephonists store their follow-up date/time on trophy_contact_sessions,
+      // not on the contacts row (pool leads keep contacts.status = 'new'), so those
+      // follow-ups are invisible to the query above unless merged in separately.
+      sc.from('trophy_contact_sessions')
+        .select('contact_id, next_action_date, next_action_time, status, owner_id, updated_at')
+        .not('next_action_date', 'is', null)
+        .not('status', 'in', '(bought,not_buying)')
+        .order('updated_at', { ascending: false })
+        .limit(300),
+    ]).then(async ([{ data }, { data: sessionRows }]) => {
+      const base = (data ?? []).map((r: any) => ({
+        id: r.id,
+        name: r.name ?? '',
+        phone: r.phone ?? '',
+        next_action_date: r.next_action_date,
+        next_action_time: r.next_action_time ? String(r.next_action_time).slice(0, 5) : undefined,
+        ownerName: r.profiles?.name ?? '—',
+        status: r.status ?? 'new',
+      }))
+
+      const seenIds = new Set(base.map(f => f.id))
+      const latestSession = new Map<string, any>()
+      for (const s of sessionRows ?? []) {
+        if (!seenIds.has(s.contact_id) && !latestSession.has(s.contact_id)) latestSession.set(s.contact_id, s)
+      }
+
+      let sessionFollowUps: typeof base = []
+      if (latestSession.size > 0) {
+        const ids = [...latestSession.keys()]
+        const ownerIds = [...new Set([...latestSession.values()].map(s => s.owner_id).filter(Boolean))]
+        const [{ data: contactInfo }, { data: ownerInfo }] = await Promise.all([
+          sc.from('contacts').select('id, name, phone').in('id', ids),
+          ownerIds.length > 0 ? sc.from('profiles').select('id, name').in('id', ownerIds) : Promise.resolve({ data: [] as any[] }),
+        ])
+        const contactMap = new Map((contactInfo ?? []).map((c: any) => [c.id, c]))
+        const ownerMap = new Map((ownerInfo ?? []).map((o: any) => [o.id, o.name]))
+        sessionFollowUps = ids.map(id => {
+          const s = latestSession.get(id)
+          const c = contactMap.get(id)
+          return {
+            id,
+            name: c?.name ?? '',
+            phone: c?.phone ?? '',
+            next_action_date: s.next_action_date,
+            next_action_time: s.next_action_time ? String(s.next_action_time).slice(0, 5) : undefined,
+            ownerName: ownerMap.get(s.owner_id) ?? '—',
+            status: s.status ?? 'new',
+          }
+        })
+      }
+
+      setAllFollowUps([...base, ...sessionFollowUps].sort((a, b) => a.next_action_date.localeCompare(b.next_action_date)))
+    })
   }, [])
 
 
