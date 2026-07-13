@@ -244,11 +244,12 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
       if (lockedByOther) setMyRequest((accessResult.data as any) ?? null)
       else if (isMineOrAdmin) setIncomingRequests((accessResult.data as any[]) ?? [])
 
-      // Admin in trophy scope: load the most recent trophy session observations + status
+      // Admin in trophy scope: load the most recent trophy session — the source of truth for
+      // status/observations/next-action/investment on trophy-worked contacts.
       if (isAdm && scope === 'trophy') {
         const { data: sessions } = await supabase
           .from('trophy_contact_sessions')
-          .select('observations, owner_id, status')
+          .select('observations, owner_id, status, next_action_date, next_action_time, last_contacted, investment_amount')
           .eq('contact_id', id)
           .order('updated_at', { ascending: false })
           .limit(1)
@@ -261,11 +262,18 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
             observations: latestSession.observations ?? '',
             ownerName: (ownerProfile as any)?.name ?? 'Trophy Τηλεφωνητής',
           })
-          // Overlay the trophy session status so the admin sees the effective status
-          // (contacts.status is 'new' for session-tracked imported leads)
-          if (latestSession.status) {
-            setContact(prev => prev ? { ...prev, status: latestSession.status as LeadStatus } : prev)
-          }
+          // Overlay the full session state so admin sees (and, on save, round-trips) the
+          // telephonist's real pipeline data instead of the raw/stale contacts row — otherwise
+          // saving would silently blank out the session's real next-action date/time/investment.
+          setContact(prev => prev ? {
+            ...prev,
+            status: (latestSession.status as LeadStatus) ?? prev.status,
+            observations: latestSession.observations ?? '',
+            nextActionDate: latestSession.next_action_date ?? undefined,
+            nextActionTime: latestSession.next_action_time ?? undefined,
+            lastContacted: latestSession.last_contacted ?? '',
+          } : prev)
+          setSaleAmount(latestSession.investment_amount ?? 0)
         }
       }
 
@@ -351,20 +359,28 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
     const isSaver = isAdmin || isOwner || isCreator || isUnclaimed
     const isBuying = contact.status === 'bought'
     const tenDaysFromNow = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
-    // Admin: only touch locked_until when marking as bought (permanent lock). Never reset a
-    // telephonist's active lock — admin edits content only, lock metadata belongs to the owner.
-    const newLockedUntil = isBuying ? '2099-12-31' : (isAdmin ? undefined : (isSaver || shouldClaim ? tenDaysFromNow : undefined))
-    const newSaleLocked = isBuying ? true : (contact.saleLocked ? true : undefined)
 
-    // Admin editing a trophy-scope contact: status always goes through trophy_contact_sessions
-    // (trophySync below), never contacts.status. Trophy telephonists' own view ignores raw
-    // contacts.status for pool contacts (to avoid inheriting stale/foreign statuses), so a
-    // direct write here would be saved but permanently invisible to them. Attribute the sync
-    // to the existing session's owner if there is one, else the contact's own owner (if it's a
-    // trophy telephonist), else admin's own id — trophySync upserts, so this always lands
-    // somewhere the telephonists' "most recent session" lookup will pick up.
+    // Admin editing a trophy-scope contact: EVERY pipeline field (status, observations,
+    // next-action date/time, last-contacted, investment amount) goes through
+    // trophy_contact_sessions — the sole source of truth for trophy-worked contacts — never
+    // the contacts row. Trophy telephonists' own view ignores these contacts-row fields for
+    // pool contacts (to avoid inheriting stale/foreign data), so writing them here would be
+    // saved but permanently invisible. Locking fields are skipped too: contacts.sale_locked /
+    // locked_until drive the REGULAR (non-trophy) pool's visibility — setting sale_locked=true
+    // here (as "mark bought" does below for regular contacts) silently vanishes the contact
+    // from every trophy telephonist's pool query, since trophy locking is a separate mechanism
+    // on the session row itself. Attribute the sync to the existing session's owner if there is
+    // one, else the contact's own owner (if it's a trophy telephonist), else admin's own id —
+    // trophySync upserts, so this always lands somewhere the telephonists' "most recent
+    // session" lookup will pick up.
     const trophyScopeSync = isAdmin && scope === 'trophy'
     const trophySyncOwnerId = trophySessionOwnerId ?? contact.ownerId ?? currentUserId
+
+    // Admin: only touch locked_until when marking as bought (permanent lock). Never reset a
+    // telephonist's active lock — admin edits content only, lock metadata belongs to the owner.
+    const newLockedUntil = trophyScopeSync ? undefined : (isBuying ? '2099-12-31' : (isAdmin ? undefined : (isSaver || shouldClaim ? tenDaysFromNow : undefined)))
+    const newSaleLocked = trophyScopeSync ? undefined : (isBuying ? true : (contact.saleLocked ? true : undefined))
+
     const row: any = {
       name: contact.name,
       phone: effectivePhone,
@@ -373,14 +389,14 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
       company_name: contact.companyName || null,
       industry: contact.industry || null,
       job_title: contact.jobTitle || null,
-      observations: contact.observations || null,
-      investment_amount: isSaver ? (saleAmount || 0) : undefined,
+      observations: trophyScopeSync ? undefined : (contact.observations || null),
+      investment_amount: trophyScopeSync ? undefined : (isSaver ? (saleAmount || 0) : undefined),
       status: trophyScopeSync ? undefined : contact.status,
       owner_id: shouldClaim ? currentUserId : (isAdmin ? undefined : (contact.ownerId ?? null)),
       priority_score: contact.priorityScore,
-      next_action_date: contact.nextActionDate?.slice(0, 10) || null,
-      next_action_time: contact.nextActionTime || null,
-      last_contacted: contact.lastContacted || null,
+      next_action_date: trophyScopeSync ? undefined : (contact.nextActionDate?.slice(0, 10) || null),
+      next_action_time: trophyScopeSync ? undefined : (contact.nextActionTime || null),
+      last_contacted: trophyScopeSync ? undefined : (contact.lastContacted || null),
       locked_until: newLockedUntil,
       sale_locked: newSaleLocked,
     }
@@ -443,10 +459,18 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
           userId: currentUserId,
           contactId: contact.id,
           row,
-          // Admin in trophy scope: sync the new status into trophy_contact_sessions (upserted
-          // server-side) so the trophy telephonist sees the change via their subscription.
+          // Admin in trophy scope: sync the full pipeline state into trophy_contact_sessions
+          // (upserted server-side) so the trophy telephonist sees the change via their subscription.
           ...(trophyScopeSync
-            ? { trophySync: { ownerId: trophySyncOwnerId, status: contact.status } }
+            ? { trophySync: {
+                ownerId: trophySyncOwnerId,
+                status: contact.status,
+                observations: contact.observations || null,
+                nextActionDate: contact.nextActionDate?.slice(0, 10) || null,
+                nextActionTime: contact.nextActionTime || null,
+                lastContacted: contact.lastContacted || null,
+                investmentAmount: isSaver ? (saleAmount || 0) : undefined,
+              } }
             : {}),
         }),
     })

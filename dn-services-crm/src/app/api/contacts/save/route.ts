@@ -116,13 +116,27 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    // Helper: sync trophy session status so the telephonist sees admin's change in real-time.
+    // Helper: sync trophy session fields so the telephonist sees admin's change in real-time.
     // Upsert (not PATCH) — a PATCH silently updates zero rows when this contact has never had
-    // a session for that owner yet, which made admin's status change invisible to the trophy
+    // a session for that owner yet, which made admin's changes invisible to the trophy
     // telephonist forever (no session row to override the 'new' fallback in their own view).
-    // Returns an error string on failure, null on success/skip.
+    // trophy_contact_sessions is the sole source of truth for status/observations/next-action/
+    // investment on trophy-scope contacts — contacts.status etc. are never written for these
+    // (see handleSave in contact-details-client.tsx). Returns an error string on failure, null
+    // on success/skip.
     const syncTrophySession = async (): Promise<string | null> => {
       if (!isAdm || !trophySync?.ownerId || !trophySync?.status) return null
+      const sessionBody: any = {
+        contact_id: contactId,
+        owner_id: trophySync.ownerId,
+        status: trophySync.status,
+        updated_at: new Date().toISOString(),
+      }
+      if (trophySync.observations !== undefined) sessionBody.observations = trophySync.observations
+      if (trophySync.nextActionDate !== undefined) sessionBody.next_action_date = trophySync.nextActionDate
+      if (trophySync.nextActionTime !== undefined) sessionBody.next_action_time = trophySync.nextActionTime
+      if (trophySync.lastContacted !== undefined) sessionBody.last_contacted = trophySync.lastContacted
+      if (trophySync.investmentAmount !== undefined) sessionBody.investment_amount = trophySync.investmentAmount
       const res = await safeFetch(
         `${SUPABASE_URL}/rest/v1/trophy_contact_sessions?on_conflict=contact_id,owner_id`,
         {
@@ -133,12 +147,7 @@ export async function POST(request: NextRequest) {
             'Content-Type': 'application/json',
             Prefer: 'resolution=merge-duplicates,return=minimal',
           },
-          body: JSON.stringify({
-            contact_id: contactId,
-            owner_id: trophySync.ownerId,
-            status: trophySync.status,
-            updated_at: new Date().toISOString(),
-          }),
+          body: JSON.stringify(sessionBody),
         }
       )
       if (!res.ok) {
