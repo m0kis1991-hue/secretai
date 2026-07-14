@@ -94,6 +94,9 @@ function sortMobileFirst(phones: string[]): string[] {
 }
 
 
+const CALL_LOCK_HOURS = 24
+const CALL_LOCK_MS = CALL_LOCK_HOURS * 60 * 60 * 1000
+
 function PhoneCallButton({
   phone,
   contactId,
@@ -102,6 +105,9 @@ function PhoneCallButton({
   callerName,
   size = "sm",
   className = "h-8 w-8 p-0 text-accent",
+  lastCalledAt,
+  lang = 'el',
+  onCalled,
 }: {
   phone: string
   contactId: string
@@ -110,23 +116,46 @@ function PhoneCallButton({
   callerName?: string
   size?: "sm" | "lg"
   className?: string
+  // Trophy-only 24h re-call lock: most recent call_logs timestamp for this contact (any
+  // telephonist). Pass only when the viewer is a trophy telephonist — omit to leave unlocked.
+  lastCalledAt?: string
+  lang?: 'el' | 'en'
+  onCalled?: (contactId: string, calledAt: string) => void
 }) {
+  const { toast } = useToast()
   const phones = sortMobileFirst(parsePhonesField(phone))
   const [pickerOpen, setPickerOpen] = useState(false)
 
+  const unlockAt = lastCalledAt ? new Date(lastCalledAt).getTime() + CALL_LOCK_MS : 0
+  const isLocked = unlockAt > Date.now()
+
+  const showLockedToast = () => {
+    const hoursLeft = Math.max(1, Math.ceil((unlockAt - Date.now()) / (60 * 60 * 1000)))
+    toast({
+      variant: 'destructive',
+      title: lang === 'el' ? 'Έχει ήδη γίνει κλήση' : 'Already called',
+      description: lang === 'el'
+        ? `Έχει γίνει κλήση σε αυτή την επαφή τις τελευταίες 24 ώρες. Ξεκλειδώνει σε περίπου ${hoursLeft} ${hoursLeft === 1 ? 'ώρα' : 'ώρες'}.`
+        : `This contact was already called in the last 24 hours. It unlocks in about ${hoursLeft}h.`,
+    })
+  }
+
   const logAndCall = (p: string) => {
+    if (isLocked) { showLockedToast(); return }
     // Fire tel: immediately — mobile browsers block tel: navigation after any await (user gesture expires)
     window.location.href = `tel:${p}`
+    const calledAt = new Date().toISOString()
+    onCalled?.(contactId, calledAt)
     if (callerId) {
       const supabase = createClient()
-      const today = new Date().toISOString().slice(0, 10)
+      const today = calledAt.slice(0, 10)
       Promise.all([
         supabase.from('call_logs').insert({
           telephonist_id: callerId,
           telephonist_name: callerName ?? '',
           contact_id: contactId,
           contact_name: contactName,
-          called_at: new Date().toISOString(),
+          called_at: calledAt,
         }),
         supabase.from('contacts').update({ last_contacted: today }).eq('id', contactId),
       ]).catch(() => {})
@@ -139,10 +168,10 @@ function PhoneCallButton({
         size={size}
         variant="ghost"
         className={className}
-        title="Κλήση"
-        onClick={(e) => { e.stopPropagation(); if (phones[0]) logAndCall(phones[0]) }}
+        title={isLocked ? (lang === 'el' ? 'Έχει ήδη κληθεί' : 'Already called') : 'Κλήση'}
+        onClick={(e) => { e.stopPropagation(); if (isLocked) { showLockedToast(); return } if (phones[0]) logAndCall(phones[0]) }}
       >
-        <Phone className="h-4 w-4" />
+        {isLocked ? <Lock className="h-4 w-4 opacity-60" /> : <Phone className="h-4 w-4" />}
       </Button>
     )
   }
@@ -153,10 +182,10 @@ function PhoneCallButton({
         size={size}
         variant="ghost"
         className={className}
-        title="Επιλογή αριθμού"
-        onClick={(e) => { e.stopPropagation(); setPickerOpen(true) }}
+        title={isLocked ? (lang === 'el' ? 'Έχει ήδη κληθεί' : 'Already called') : 'Επιλογή αριθμού'}
+        onClick={(e) => { e.stopPropagation(); if (isLocked) { showLockedToast(); return } setPickerOpen(true) }}
       >
-        <Phone className="h-4 w-4" />
+        {isLocked ? <Lock className="h-4 w-4 opacity-60" /> : <Phone className="h-4 w-4" />}
       </Button>
       <Dialog open={pickerOpen} onOpenChange={setPickerOpen}>
         <DialogContent className="max-w-xs" onClick={(e) => e.stopPropagation()}>
@@ -270,6 +299,10 @@ export default function ContactsPage() {
   const myTrophyContactIds = useRef<Set<string>>(new Set())
   // IDs of profiles with top_leads_access (trophy telephonists) — used for admin scope filter
   const trophyUserIdsRef = useRef<string[]>([])
+  // contact_id → most recent call_logs.called_at (any trophy telephonist) within the last 24h.
+  // Drives the trophy-only "already called" lock on PhoneCallButton — never populated/consulted
+  // for regular telephonists or admin.
+  const [recentCallMap, setRecentCallMap] = useState<Map<string, string>>(new Map())
 
   const CONTACT_BASE_COLUMNS = 'id,name,phone,email,address,company_name,industry,job_title,status,owner_id,created_by,locked_until,sale_locked,last_contacted,priority_score,next_action_date,next_action_time,investment_amount,lead_source,created_at'
 
@@ -505,6 +538,27 @@ export default function ContactsPage() {
         } else if (error) {
           console.error('[loadContacts] trophy failed:', error.message)
         }
+
+        // 24h "already called" lock, shared across all trophy telephonists. call_logs RLS only
+        // lets a telephonist read their own rows, so this goes through a server route (service
+        // key) that scopes results to calls placed by trophy telephonists only — never a regular
+        // telephonist's calls. No contact_id filter needed: bounded by call volume in the
+        // window, not by how many contacts are loaded (avoids a huge IN(...) clause).
+        supabase.auth.getSession().then(({ data: { session } }) => {
+          const token = session?.access_token
+          if (!token) return
+          fetch('/api/trophy/recent-calls', { headers: { Authorization: `Bearer ${token}` } })
+            .then(res => res.json())
+            .then(({ calls }) => {
+              if (myId !== loadIdRef.current) return
+              const m = new Map<string, string>()
+              for (const c of calls ?? []) {
+                if (!m.has(c.contact_id)) m.set(c.contact_id, c.called_at) // first = most recent (desc order)
+              }
+              setRecentCallMap(m)
+            })
+            .catch(() => {})
+        })
       } else {
         // Admin / regular telephonist
         let res = await buildQuery(true)
@@ -1012,6 +1066,16 @@ export default function ContactsPage() {
   const paginated = (isAdmin && !topLeadsAccess)
     ? filtered   // filtered = contacts (with optional trophy status filter applied client-side)
     : filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
+
+  // Reflects a just-placed call into recentCallMap immediately, so a rapid second click on the
+  // same contact is blocked without waiting for a full reload.
+  const handleCallLogged = (contactId: string, calledAt: string) => {
+    setRecentCallMap(prev => {
+      const next = new Map(prev)
+      next.set(contactId, calledAt)
+      return next
+    })
+  }
 
   // ── Status helpers ─────────────────────────────────────────────────────────
   const handleSendJ2TEmail = (contact: Contact) => {
@@ -1584,7 +1648,7 @@ export default function ContactsPage() {
                             <span className="text-[10px] text-muted-foreground">{contact.priorityScore}%</span>
                           </div>
                           <div className="flex gap-1">
-                            <PhoneCallButton phone={contact.phone} contactId={contact.id} contactName={contact.name} callerId={currentUserId} callerName={userName} />
+                            <PhoneCallButton phone={contact.phone} contactId={contact.id} contactName={contact.name} callerId={currentUserId} callerName={userName} lastCalledAt={topLeadsAccess ? recentCallMap.get(contact.id) : undefined} lang={lang} onCalled={handleCallLogged} />
                             {contact.email && (
                               <Button size="sm" variant="ghost"
                                 className="h-8 w-8 p-0 text-blue-600"
@@ -1713,7 +1777,7 @@ export default function ContactsPage() {
                             )}
                             <TableCell className="text-right" onClick={e => e.stopPropagation()}>
                               <div className="flex justify-end gap-1">
-                                <PhoneCallButton phone={contact.phone} contactId={contact.id} contactName={contact.name} callerId={currentUserId} callerName={userName} className="h-9 w-9 p-0 text-accent" />
+                                <PhoneCallButton phone={contact.phone} contactId={contact.id} contactName={contact.name} callerId={currentUserId} callerName={userName} lastCalledAt={topLeadsAccess ? recentCallMap.get(contact.id) : undefined} lang={lang} onCalled={handleCallLogged} className="h-9 w-9 p-0 text-accent" />
                                 {contact.email && (
                                   <Button size="sm" variant="ghost" className="h-9 w-9 p-0 text-blue-600"
                                     title={lang === 'el' ? 'Αποστολή email J2T' : 'Send J2T email'}
@@ -1872,7 +1936,7 @@ export default function ContactsPage() {
                                 </div>
                                 <div className="flex items-center justify-end gap-1">
                                   <div className="flex gap-0.5" onClick={e => e.stopPropagation()}>
-                                    <PhoneCallButton phone={contact.phone} contactId={contact.id} contactName={contact.name} callerId={currentUserId} callerName={userName} className="h-9 w-9 p-0 text-accent" />
+                                    <PhoneCallButton phone={contact.phone} contactId={contact.id} contactName={contact.name} callerId={currentUserId} callerName={userName} lastCalledAt={topLeadsAccess ? recentCallMap.get(contact.id) : undefined} lang={lang} onCalled={handleCallLogged} className="h-9 w-9 p-0 text-accent" />
                                   </div>
                                 </div>
                                 {canEdit(contact) && (

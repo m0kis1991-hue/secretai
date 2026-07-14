@@ -127,6 +127,9 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
   const [selectedPhoneIdx, setSelectedPhoneIdx] = useState(0)
   const [addingPhone, setAddingPhone] = useState<string | null>(null)
   const [trophyObs, setTrophyObs] = useState<{ observations: string; ownerName: string } | null>(null)
+  // Trophy-only 24h re-call lock: most recent call_logs timestamp for this contact (any
+  // telephonist), only when it falls within the last 24h. Never set for non-trophy contacts.
+  const [lastCalledAt, setLastCalledAt] = useState<string | null>(null)
 
   useEffect(() => {
     const savedLang = localStorage.getItem('app-lang') as 'el' | 'en'
@@ -177,24 +180,33 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
 
       // Trophy telephonist: load their own session overlay
       if (isTrophy) {
-        const { data: session } = await supabase
-          .from('trophy_contact_sessions')
-          .select('*')
-          .eq('contact_id', id)
-          .eq('owner_id', user.id)
-          .maybeSingle()
-        if (session) {
-          setTrophySessionId(session.id)
+        // call_logs RLS only lets a telephonist read their own rows, so the shared 24h re-call
+        // lock (any trophy telephonist's call counts) goes through a server route that scopes
+        // results to trophy telephonists only — see /api/trophy/recent-calls.
+        const [{ data: trophySession }, recentCallsRes] = await Promise.all([
+          supabase
+            .from('trophy_contact_sessions')
+            .select('*')
+            .eq('contact_id', id)
+            .eq('owner_id', user.id)
+            .maybeSingle(),
+          fetch(`/api/trophy/recent-calls?contactId=${id}`, {
+            headers: session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {},
+          }).then(r => r.json()).catch(() => ({ calls: [] })),
+        ])
+        setLastCalledAt(recentCallsRes?.calls?.[0]?.called_at ?? null)
+        if (trophySession) {
+          setTrophySessionId(trophySession.id)
           setContact(prev => prev ? {
             ...prev,
-            observations: session.observations ?? '',
-            status: session.status ?? 'new',
-            nextActionDate: session.next_action_date ?? undefined,
-            nextActionTime: session.next_action_time ?? undefined,
-            lastContacted: session.last_contacted ?? '',
-            investmentAmount: session.investment_amount ?? 0,
+            observations: trophySession.observations ?? '',
+            status: trophySession.status ?? 'new',
+            nextActionDate: trophySession.next_action_date ?? undefined,
+            nextActionTime: trophySession.next_action_time ?? undefined,
+            lastContacted: trophySession.last_contacted ?? '',
+            investmentAmount: trophySession.investment_amount ?? 0,
           } : prev)
-          setSaleAmount(session.investment_amount ?? 0)
+          setSaleAmount(trophySession.investment_amount ?? 0)
         } else {
           setTrophySessionId(null)
           // If the trophy telephonist owns this contact (created it directly), keep the
@@ -602,6 +614,21 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
 
   const handleMakeCall = (specificPhone?: string) => {
     if (!contact) return
+    // Trophy 24h re-call lock: shared across all trophy telephonists, not just this one.
+    if (isTrophyMode && lastCalledAt) {
+      const unlockAt = new Date(lastCalledAt).getTime() + 24 * 60 * 60 * 1000
+      if (unlockAt > Date.now()) {
+        const hoursLeft = Math.max(1, Math.ceil((unlockAt - Date.now()) / (60 * 60 * 1000)))
+        toast({
+          variant: 'destructive',
+          title: lang === 'el' ? 'Έχει ήδη γίνει κλήση' : 'Already called',
+          description: lang === 'el'
+            ? `Έχει γίνει κλήση σε αυτή την επαφή τις τελευταίες 24 ώρες. Ξεκλειδώνει σε περίπου ${hoursLeft} ${hoursLeft === 1 ? 'ώρα' : 'ώρες'}.`
+            : `This contact was already called in the last 24 hours. It unlocks in about ${hoursLeft}h.`,
+        })
+        return
+      }
+    }
     const phones = phoneList.filter(Boolean)
     const phoneToCall = specificPhone ?? phones[selectedPhoneIdx] ?? phones[0] ?? ''
     if (!phoneToCall) return
@@ -612,13 +639,15 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
       const supabase = createClient()
       const today = new Date().toISOString().slice(0, 10)
       if (isTrophyMode) {
+        const calledAt = new Date().toISOString()
+        setLastCalledAt(calledAt)
         Promise.all([
           supabase.from('call_logs').insert({
             telephonist_id: currentUserId,
             telephonist_name: userName,
             contact_id: contact.id,
             contact_name: contact.name,
-            called_at: new Date().toISOString(),
+            called_at: calledAt,
           }),
           supabase.from('trophy_contact_sessions').upsert({
             contact_id: contact.id,
@@ -923,8 +952,12 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
                           </Select>
                           <Button size="icon" variant="outline" className="h-9 w-9 text-accent shrink-0"
                             onClick={() => handleMakeCall()}
-                            title={lang === 'el' ? 'Κλήση & καταγραφή' : 'Call & log'}>
-                            <Phone className="h-4 w-4" />
+                            title={isTrophyMode && lastCalledAt && new Date(lastCalledAt).getTime() + 24 * 60 * 60 * 1000 > Date.now()
+                              ? (lang === 'el' ? 'Έχει ήδη κληθεί τις τελευταίες 24 ώρες' : 'Already called in the last 24h')
+                              : (lang === 'el' ? 'Κλήση & καταγραφή' : 'Call & log')}>
+                            {isTrophyMode && lastCalledAt && new Date(lastCalledAt).getTime() + 24 * 60 * 60 * 1000 > Date.now()
+                              ? <Lock className="h-4 w-4 opacity-60" />
+                              : <Phone className="h-4 w-4" />}
                           </Button>
                           {!lockedByOther && phoneList.filter(Boolean).length > 0 && (
                             <Button size="icon" variant="ghost" className="h-9 w-9 text-muted-foreground hover:text-destructive shrink-0"
