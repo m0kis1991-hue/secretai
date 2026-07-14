@@ -28,6 +28,7 @@ import { STATUS, isAdmin as isAdminRole } from "../lib/constants"
 import { rowToContact } from "../lib/contact-utils"
 import { ImportLeadsDialog } from "@/components/contacts/import-leads-dialog"
 import { useToast } from "@/hooks/use-toast"
+import { ToastAction } from "@/components/ui/toast"
 import { cn } from "@/lib/utils"
 
 // ── Multi-phone helpers ───────────────────────────────────────────────────────
@@ -129,19 +130,7 @@ function PhoneCallButton({
   const unlockAt = lastCalledAt ? new Date(lastCalledAt).getTime() + CALL_LOCK_MS : 0
   const isLocked = unlockAt > Date.now()
 
-  const showLockedToast = () => {
-    const hoursLeft = Math.max(1, Math.ceil((unlockAt - Date.now()) / (60 * 60 * 1000)))
-    toast({
-      variant: 'destructive',
-      title: lang === 'el' ? 'Έχει ήδη γίνει κλήση' : 'Already called',
-      description: lang === 'el'
-        ? `Έχει γίνει κλήση σε αυτή την επαφή τις τελευταίες 24 ώρες. Ξεκλειδώνει σε περίπου ${hoursLeft} ${hoursLeft === 1 ? 'ώρα' : 'ώρες'}.`
-        : `This contact was already called in the last 24 hours. It unlocks in about ${hoursLeft}h.`,
-    })
-  }
-
-  const logAndCall = (p: string) => {
-    if (isLocked) { showLockedToast(); return }
+  const placeCall = (p: string) => {
     // Fire tel: immediately — mobile browsers block tel: navigation after any await (user gesture expires)
     window.location.href = `tel:${p}`
     const calledAt = new Date().toISOString()
@@ -162,6 +151,29 @@ function PhoneCallButton({
     }
   }
 
+  // Locked: ask for confirmation instead of dialing outright. Confirming places the call anyway
+  // (which logs a fresh call_logs row and naturally re-locks from that moment, same as any call).
+  const showLockedToast = (p: string) => {
+    const hoursLeft = Math.max(1, Math.ceil((unlockAt - Date.now()) / (60 * 60 * 1000)))
+    toast({
+      variant: 'destructive',
+      title: lang === 'el' ? 'Έχει ήδη γίνει κλήση' : 'Already called',
+      description: lang === 'el'
+        ? `Έχει γίνει κλήση σε αυτή την επαφή τις τελευταίες 24 ώρες. Ξεκλειδώνει σε περίπου ${hoursLeft} ${hoursLeft === 1 ? 'ώρα' : 'ώρες'}. Θέλετε οπωσδήποτε να καλέσετε;`
+        : `This contact was already called in the last 24 hours. It unlocks in about ${hoursLeft}h. Do you want to call anyway?`,
+      action: (
+        <ToastAction altText={lang === 'el' ? 'Κλήση οπωσδήποτε' : 'Call anyway'} onClick={() => placeCall(p)}>
+          {lang === 'el' ? 'Κλήση οπωσδήποτε' : 'Call anyway'}
+        </ToastAction>
+      ),
+    })
+  }
+
+  const logAndCall = (p: string) => {
+    if (isLocked) { showLockedToast(p); return }
+    placeCall(p)
+  }
+
   if (phones.length <= 1) {
     return (
       <Button
@@ -169,7 +181,7 @@ function PhoneCallButton({
         variant="ghost"
         className={className}
         title={isLocked ? (lang === 'el' ? 'Έχει ήδη κληθεί' : 'Already called') : 'Κλήση'}
-        onClick={(e) => { e.stopPropagation(); if (isLocked) { showLockedToast(); return } if (phones[0]) logAndCall(phones[0]) }}
+        onClick={(e) => { e.stopPropagation(); if (phones[0]) logAndCall(phones[0]) }}
       >
         {isLocked ? <Lock className="h-4 w-4 opacity-60" /> : <Phone className="h-4 w-4" />}
       </Button>
@@ -183,7 +195,7 @@ function PhoneCallButton({
         variant="ghost"
         className={className}
         title={isLocked ? (lang === 'el' ? 'Έχει ήδη κληθεί' : 'Already called') : 'Επιλογή αριθμού'}
-        onClick={(e) => { e.stopPropagation(); if (isLocked) { showLockedToast(); return } setPickerOpen(true) }}
+        onClick={(e) => { e.stopPropagation(); if (isLocked) { showLockedToast(phones[0]); return } setPickerOpen(true) }}
       >
         {isLocked ? <Lock className="h-4 w-4 opacity-60" /> : <Phone className="h-4 w-4" />}
       </Button>

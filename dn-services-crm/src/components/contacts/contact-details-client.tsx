@@ -59,6 +59,7 @@ import { intelligentObservationSummary, IntelligentObservationSummaryOutput } fr
 import { draftFollowUpEmail, DraftFollowUpEmailOutput } from "@/ai/flows/ai-powered-follow-up-email"
 import { generateCallScript, CallScriptOutput } from "@/ai/flows/call-script-flow"
 import { useToast } from "@/hooks/use-toast"
+import { ToastAction } from "@/components/ui/toast"
 import { cn } from "@/lib/utils"
 import { createClient } from "@/lib/supabase/client"
 
@@ -612,10 +613,12 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
     } finally { setIsCallScriptLoading(false) }
   }
 
-  const handleMakeCall = (specificPhone?: string) => {
+  const handleMakeCall = (specificPhone?: string, force = false) => {
     if (!contact) return
     // Trophy 24h re-call lock: shared across all trophy telephonists, not just this one.
-    if (isTrophyMode && lastCalledAt) {
+    // Locked: ask for confirmation instead of dialing outright. Confirming (force=true) places
+    // the call anyway, which logs a fresh call and naturally re-locks from that moment.
+    if (isTrophyMode && lastCalledAt && !force) {
       const unlockAt = new Date(lastCalledAt).getTime() + 24 * 60 * 60 * 1000
       if (unlockAt > Date.now()) {
         const hoursLeft = Math.max(1, Math.ceil((unlockAt - Date.now()) / (60 * 60 * 1000)))
@@ -623,8 +626,13 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
           variant: 'destructive',
           title: lang === 'el' ? 'Έχει ήδη γίνει κλήση' : 'Already called',
           description: lang === 'el'
-            ? `Έχει γίνει κλήση σε αυτή την επαφή τις τελευταίες 24 ώρες. Ξεκλειδώνει σε περίπου ${hoursLeft} ${hoursLeft === 1 ? 'ώρα' : 'ώρες'}.`
-            : `This contact was already called in the last 24 hours. It unlocks in about ${hoursLeft}h.`,
+            ? `Έχει γίνει κλήση σε αυτή την επαφή τις τελευταίες 24 ώρες. Ξεκλειδώνει σε περίπου ${hoursLeft} ${hoursLeft === 1 ? 'ώρα' : 'ώρες'}. Θέλετε οπωσδήποτε να καλέσετε;`
+            : `This contact was already called in the last 24 hours. It unlocks in about ${hoursLeft}h. Do you want to call anyway?`,
+          action: (
+            <ToastAction altText={lang === 'el' ? 'Κλήση οπωσδήποτε' : 'Call anyway'} onClick={() => handleMakeCall(specificPhone, true)}>
+              {lang === 'el' ? 'Κλήση οπωσδήποτε' : 'Call anyway'}
+            </ToastAction>
+          ),
         })
         return
       }
