@@ -341,6 +341,12 @@ export default function ContactsPage() {
     // For admin + trophy scope (or probable filter): pre-fetched contact IDs from trophy sessions
     // populated before buildQuery is called so closure sees updated value
     let trophyStatusIds: string[] | null = null
+    // Trophy telephonists' own 'probable' filter: the shared pool query sorts by rating and caps
+    // at ~2000 rows, so a probable contact with low/no rating can silently fall outside that
+    // window and never appear to anyone browsing collectively (verified: ~1 in 4 currently do).
+    // Bypass the rating window entirely for this filter — fetch exactly which contacts are
+    // probable right now (latest session status per contact, not "ever was probable").
+    let trophyProbableIds: string[] | null = null
 
     const buildQuery = (withRating: boolean) => {
       const cols = withRating ? `${CONTACT_BASE_COLUMNS},rating,review_count` : CONTACT_BASE_COLUMNS
@@ -349,6 +355,20 @@ export default function ContactsPage() {
       let q = supabase.from('contacts').select(cols, countOpt)
 
       if (p.topLeadsAccess) {
+        if (trophyProbableIds !== null) {
+          // 'probable' filter: bypass the rating-sorted pool window entirely (see comment above
+          // trophyProbableIds) — we already know exactly which contacts qualify.
+          q = q
+            .or('sale_locked.is.false,sale_locked.is.null')
+            .in('id', trophyProbableIds.length > 0 ? trophyProbableIds : ['00000000-0000-0000-0000-000000000000'])
+            .order('rating', { ascending: false, nullsFirst: false })
+            .order('created_at', { ascending: false })
+          if (p.debouncedSearch) {
+            const s = p.debouncedSearch.replace(/'/g, "''")
+            q = q.or(`name.ilike.%${s}%,phone.ilike.%${s}%`)
+          }
+          q = q.range(0, 9999)
+        } else {
         // Trophy pool = unclaimed contacts (owner_id IS NULL), plus contacts "soft-assigned" to
         // a TROPHY telephonist with no active lock (imported leads never time-locked — that's
         // where the rated Google Maps leads live). Soft-assignment only counts when the owner
@@ -376,6 +396,7 @@ export default function ContactsPage() {
           q = q.range(0, 499)
         } else {
           q = q.range(0, 1999)
+        }
         }
       } else if (!isAdminRole(p.userRole) && p.currentUserId) {
         if (p.debouncedSearch) {
@@ -502,6 +523,23 @@ export default function ContactsPage() {
         for (const s of troSessions ?? []) {
           if (!seen.has(s.contact_id)) { seen.add(s.contact_id); trophyStatusIds.push(s.contact_id) }
         }
+      }
+
+      // Trophy telephonist's own 'probable' filter: resolve exactly which contacts are probable
+      // RIGHT NOW — the latest session per contact, not "ever had a probable session" (a contact
+      // that moved on to another status shouldn't still show up here).
+      if (p.topLeadsAccess && p.activeFilter === 'probable' && !isKanban) {
+        const { data: sessions } = await supabase
+          .from('trophy_contact_sessions')
+          .select('contact_id, status, updated_at')
+          .order('updated_at', { ascending: false })
+          .range(0, 9999)
+        if (myId !== loadIdRef.current) return
+        const latest = new Map<string, string>()
+        for (const s of sessions ?? []) {
+          if (!latest.has(s.contact_id)) latest.set(s.contact_id, s.status)
+        }
+        trophyProbableIds = [...latest.entries()].filter(([, st]) => st === 'probable').map(([id]) => id)
       }
 
       if (p.topLeadsAccess) {
