@@ -60,6 +60,7 @@ import { draftFollowUpEmail, DraftFollowUpEmailOutput } from "@/ai/flows/ai-powe
 import { generateCallScript, CallScriptOutput } from "@/ai/flows/call-script-flow"
 import { useToast } from "@/hooks/use-toast"
 import { ToastAction } from "@/components/ui/toast"
+import { logCallKeepAlive } from "@/lib/call-log"
 import { cn } from "@/lib/utils"
 import { createClient } from "@/lib/supabase/client"
 
@@ -110,6 +111,9 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
   const [draftEmail, setDraftEmail] = useState<DraftFollowUpEmailOutput | null>(null)
   const [callScript, setCallScript] = useState<CallScriptOutput | null>(null)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  // Cached JWT for keepalive call-log writes — must be available synchronously at click time so
+  // logging a call never delays the tel: navigation that has to fire in the same user gesture.
+  const [accessToken, setAccessToken] = useState<string | null>(null)
   const [userRole, setUserRole] = useState<string>('telephonist')
   const [userName, setUserName] = useState<string>('')
   const [saleAmount, setSaleAmount] = useState<number>(0)
@@ -149,8 +153,15 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
 
     const supabase = createClient()
 
+    // Keep the cached access token fresh across the visit (Supabase auto-refreshes it
+    // periodically) so a keepalive call-log write doesn't fail with a stale JWT.
+    const { data: authSub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAccessToken(session?.access_token ?? null)
+    })
+
     const init = async () => {
       const { data: { session } } = await supabase.auth.getSession()
+      setAccessToken(session?.access_token ?? null)
       const user = session?.user
       if (!user) return
       setCurrentUserId(user.id)
@@ -294,6 +305,7 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
     }
 
     init()
+    return () => { authSub.subscription.unsubscribe() }
   }, [id])
 
   if (loading) return <div className="p-10 text-center"><RefreshCcw className="h-5 w-5 animate-spin mx-auto text-muted-foreground" /></div>
@@ -646,44 +658,38 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
     if (currentUserId) {
       const supabase = createClient()
       const today = new Date().toISOString().slice(0, 10)
+      const calledAt = new Date().toISOString()
+      // Regular supabase-js writes are plain fetches with no guarantee of completing once the
+      // page starts navigating to tel: right after — on mobile that can suspend/unload the page
+      // before the request lands, silently dropping the call log. keepalive:true (used for the
+      // call_logs write below) is the browser's contract that it's still sent regardless.
+      logCallKeepAlive({
+        accessToken,
+        telephonistId: currentUserId,
+        telephonistName: userName,
+        contactId: contact.id,
+        contactName: contact.name,
+        calledAt,
+      })
       if (isTrophyMode) {
-        const calledAt = new Date().toISOString()
         setLastCalledAt(calledAt)
-        Promise.all([
-          supabase.from('call_logs').insert({
-            telephonist_id: currentUserId,
-            telephonist_name: userName,
-            contact_id: contact.id,
-            contact_name: contact.name,
-            called_at: calledAt,
-          }),
-          supabase.from('trophy_contact_sessions').upsert({
-            contact_id: contact.id,
-            owner_id: currentUserId,
-            last_contacted: today,
-            locked_until: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
-            updated_at: new Date().toISOString(),
-          }, { onConflict: 'contact_id,owner_id' }),
-        ]).then(() => {
+        Promise.resolve(supabase.from('trophy_contact_sessions').upsert({
+          contact_id: contact.id,
+          owner_id: currentUserId,
+          last_contacted: today,
+          locked_until: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'contact_id,owner_id' })).then(() => {
           setContact(c => c ? { ...c, lastContacted: today } : c)
         }).catch(() => {})
       } else {
         const tenDaysFromNow = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
-        Promise.all([
-          supabase.from('call_logs').insert({
-            telephonist_id: currentUserId,
-            telephonist_name: userName,
-            contact_id: contact.id,
-            contact_name: contact.name,
-            called_at: new Date().toISOString(),
-          }),
-          supabase.from('contacts').update({
-            last_contacted: today,
-            ...(!contact.saleLocked && (contact.ownerId === null || contact.ownerId === currentUserId)
-              ? { owner_id: currentUserId, locked_until: tenDaysFromNow }
-              : {}),
-          }).eq('id', contact.id),
-        ]).then(() => {
+        Promise.resolve(supabase.from('contacts').update({
+          last_contacted: today,
+          ...(!contact.saleLocked && (contact.ownerId === null || contact.ownerId === currentUserId)
+            ? { owner_id: currentUserId, locked_until: tenDaysFromNow }
+            : {}),
+        }).eq('id', contact.id)).then(() => {
           setContact(c => c ? { ...c, ownerId: currentUserId, lockedUntil: tenDaysFromNow, lastContacted: today } : c)
         }).catch(() => {})
       }

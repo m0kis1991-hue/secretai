@@ -29,6 +29,7 @@ import { rowToContact } from "../lib/contact-utils"
 import { ImportLeadsDialog } from "@/components/contacts/import-leads-dialog"
 import { useToast } from "@/hooks/use-toast"
 import { ToastAction } from "@/components/ui/toast"
+import { logCallKeepAlive } from "@/lib/call-log"
 import { cn } from "@/lib/utils"
 
 // ── Multi-phone helpers ───────────────────────────────────────────────────────
@@ -104,6 +105,7 @@ function PhoneCallButton({
   contactName,
   callerId,
   callerName,
+  accessToken,
   size = "sm",
   className = "h-8 w-8 p-0 text-accent",
   lastCalledAt,
@@ -115,6 +117,8 @@ function PhoneCallButton({
   contactName: string
   callerId?: string | null
   callerName?: string
+  // Cached JWT for the keepalive call-log write — see logCallKeepAlive.
+  accessToken?: string | null
   size?: "sm" | "lg"
   className?: string
   // Trophy-only 24h re-call lock: most recent call_logs timestamp for this contact (any
@@ -136,18 +140,14 @@ function PhoneCallButton({
     const calledAt = new Date().toISOString()
     onCalled?.(contactId, calledAt)
     if (callerId) {
-      const supabase = createClient()
-      const today = calledAt.slice(0, 10)
-      Promise.all([
-        supabase.from('call_logs').insert({
-          telephonist_id: callerId,
-          telephonist_name: callerName ?? '',
-          contact_id: contactId,
-          contact_name: contactName,
-          called_at: calledAt,
-        }),
-        supabase.from('contacts').update({ last_contacted: today }).eq('id', contactId),
-      ]).catch(() => {})
+      logCallKeepAlive({
+        accessToken,
+        telephonistId: callerId,
+        telephonistName: callerName ?? '',
+        contactId,
+        contactName,
+        calledAt,
+      })
     }
   }
 
@@ -293,6 +293,9 @@ export default function ContactsPage() {
   const [view, setView] = useState<'table' | 'kanban'>('table')
   const [userRole, setUserRole] = useState<string>('telephonist')
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  // Cached JWT for keepalive call-log writes — must be available synchronously at click time so
+  // logging a call never delays the tel: navigation that has to fire in the same user gesture.
+  const [accessToken, setAccessToken] = useState<string | null>(null)
   const [userName, setUserName] = useState('')
   const [pendingRequests, setPendingRequests] = useState<{ id: string; contact_id: string; contact_name: string; requester_name: string; requester_id: string }[]>([])
   const [telephonists, setTelephonists] = useState<{ id: string; name: string }[]>([])
@@ -638,10 +641,16 @@ export default function ContactsPage() {
     if (savedView) setView(savedView)
 
     const supabase = createClient()
+    // Keep the cached access token fresh across the session (Supabase auto-refreshes it
+    // periodically) so a keepalive call-log write hours into a shift doesn't fail with a stale JWT.
+    const { data: authSub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAccessToken(session?.access_token ?? null)
+    })
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       const user = session?.user
       if (!user) return
       setCurrentUserId(user.id)
+      setAccessToken(session?.access_token ?? null)
       // Profile + pending requests in parallel
       const [{ data }, { data: reqs }] = await Promise.all([
         supabase.from('profiles').select('role, name, top_leads_access').eq('id', user.id).single(),
@@ -734,6 +743,7 @@ export default function ContactsPage() {
       }
       loadContacts({ userId: user.id, role, excludeIds: resolvedTestIds, tla })
     }).catch(() => {})
+    return () => { authSub.subscription.unsubscribe() }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) // intentionally once — auth state is bootstrapped here, loadContacts reads paramsRef
 
@@ -1660,7 +1670,7 @@ export default function ContactsPage() {
                             <span className="text-[10px] text-muted-foreground">{contact.priorityScore}%</span>
                           </div>
                           <div className="flex gap-1">
-                            <PhoneCallButton phone={contact.phone} contactId={contact.id} contactName={contact.name} callerId={currentUserId} callerName={userName} lastCalledAt={topLeadsAccess ? recentCallMap.get(contact.id) : undefined} lang={lang} onCalled={handleCallLogged} />
+                            <PhoneCallButton phone={contact.phone} contactId={contact.id} contactName={contact.name} callerId={currentUserId} callerName={userName} accessToken={accessToken} lastCalledAt={topLeadsAccess ? recentCallMap.get(contact.id) : undefined} lang={lang} onCalled={handleCallLogged} />
                             {contact.email && (
                               <Button size="sm" variant="ghost"
                                 className="h-8 w-8 p-0 text-blue-600"
@@ -1789,7 +1799,7 @@ export default function ContactsPage() {
                             )}
                             <TableCell className="text-right" onClick={e => e.stopPropagation()}>
                               <div className="flex justify-end gap-1">
-                                <PhoneCallButton phone={contact.phone} contactId={contact.id} contactName={contact.name} callerId={currentUserId} callerName={userName} lastCalledAt={topLeadsAccess ? recentCallMap.get(contact.id) : undefined} lang={lang} onCalled={handleCallLogged} className="h-9 w-9 p-0 text-accent" />
+                                <PhoneCallButton phone={contact.phone} contactId={contact.id} contactName={contact.name} callerId={currentUserId} callerName={userName} accessToken={accessToken} lastCalledAt={topLeadsAccess ? recentCallMap.get(contact.id) : undefined} lang={lang} onCalled={handleCallLogged} className="h-9 w-9 p-0 text-accent" />
                                 {contact.email && (
                                   <Button size="sm" variant="ghost" className="h-9 w-9 p-0 text-blue-600"
                                     title={lang === 'el' ? 'Αποστολή email J2T' : 'Send J2T email'}
@@ -1948,7 +1958,7 @@ export default function ContactsPage() {
                                 </div>
                                 <div className="flex items-center justify-end gap-1">
                                   <div className="flex gap-0.5" onClick={e => e.stopPropagation()}>
-                                    <PhoneCallButton phone={contact.phone} contactId={contact.id} contactName={contact.name} callerId={currentUserId} callerName={userName} lastCalledAt={topLeadsAccess ? recentCallMap.get(contact.id) : undefined} lang={lang} onCalled={handleCallLogged} className="h-9 w-9 p-0 text-accent" />
+                                    <PhoneCallButton phone={contact.phone} contactId={contact.id} contactName={contact.name} callerId={currentUserId} callerName={userName} accessToken={accessToken} lastCalledAt={topLeadsAccess ? recentCallMap.get(contact.id) : undefined} lang={lang} onCalled={handleCallLogged} className="h-9 w-9 p-0 text-accent" />
                                   </div>
                                 </div>
                                 {canEdit(contact) && (
