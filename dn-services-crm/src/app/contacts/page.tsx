@@ -301,14 +301,22 @@ export default function ContactsPage() {
       let q = supabase.from('contacts').select(cols, countOpt)
 
       if (p.topLeadsAccess) {
-        // Trophy: exclude ONLY contacts with an active time-lock (owner_id set + locked_until in the future).
-        // Contacts with owner_id but NO locked_until are "soft-assigned" (imported leads never time-locked)
-        // and should be visible to trophy — that's where all the rated Google Maps leads live.
-        // Condition: exclude where locked_until IS NOT NULL AND locked_until >= today AND owner_id IS NOT NULL.
-        // Equivalent to: include where (owner_id IS NULL) OR (locked_until IS NULL) OR (locked_until < today).
+        // Trophy pool = unclaimed contacts (owner_id IS NULL), plus contacts "soft-assigned" to
+        // a TROPHY telephonist with no active lock (imported leads never time-locked — that's
+        // where the rated Google Maps leads live). Soft-assignment only counts when the owner
+        // is actually a trophy telephonist: the old blanket "locked_until IS NULL" clause didn't
+        // check ownership at all, so ~8700 regular telephonists' own live contacts (which
+        // commonly sit with no active lock) leaked straight into the trophy pool. Trophy and
+        // regular telephonists do unrelated work and must never see each other's contacts.
+        const trophyIds = trophyUserIdsRef.current
+        const softAssigned = trophyIds.length > 0 ? `owner_id.in.(${trophyIds.join(',')})` : null
+        const poolParts = [
+          'owner_id.is.null',
+          ...(softAssigned ? [`and(${softAssigned},locked_until.is.null)`, `and(${softAssigned},locked_until.lt.${today})`] : []),
+        ]
         q = q
           .or('sale_locked.is.false,sale_locked.is.null')
-          .or(`owner_id.is.null,locked_until.is.null,locked_until.lt.${today}`)
+          .or(poolParts.join(','))
         // Sort: Google Maps / rated contacts first (NULLS LAST), then newest by date within each group
         q = (q as any)
           .order('rating', { ascending: false, nullsFirst: false })
@@ -326,9 +334,11 @@ export default function ContactsPage() {
           // Search mode: expand to the full pool but hide contacts already owned by other telephonists.
           // Show: pool contacts (owner_id IS NULL) + own contacts (owner_id = me).
           // Hides contacts claimed by colleagues so results are only fresh or personally-worked leads.
+          // Unclaimed pool leads with a rating are trophy-pool leads (Google Maps imports) — trophy
+          // and regular telephonists do unrelated work, so those never surface in a regular search.
           const s = p.debouncedSearch.replace(/'/g, "''")
           q = q
-            .or(`owner_id.is.null,owner_id.eq.${p.currentUserId}`)
+            .or(`and(owner_id.is.null,rating.is.null),owner_id.eq.${p.currentUserId}`)
             .or(`name.ilike.%${s}%,phone.ilike.%${s}%`)
             .order('priority_score', { ascending: false })
           q = q.range(0, 499)
@@ -589,11 +599,17 @@ export default function ContactsPage() {
         // Await sessions BEFORE loadContacts so effectiveStatus is correct from the first render.
         // Use range(0,9999) — Supabase caps unranged queries at 1000 rows; without this, sessions
         // beyond row 1000 are silently dropped and effectiveStatus falls back to stale contacts.status.
-        const { data: sessions } = await supabase
-          .from('trophy_contact_sessions')
-          .select('contact_id, status, next_action_date, next_action_time, owner_id, updated_at')
-          .order('updated_at', { ascending: false })
-          .range(0, 9999)
+        // Also resolve the trophy user id list — buildQuery needs it to recognize "soft-assigned to
+        // a fellow trophy telephonist" contacts without accidentally matching regular telephonists'.
+        const [{ data: sessions }, { data: trophyProfiles }] = await Promise.all([
+          supabase
+            .from('trophy_contact_sessions')
+            .select('contact_id, status, next_action_date, next_action_time, owner_id, updated_at')
+            .order('updated_at', { ascending: false })
+            .range(0, 9999),
+          supabase.from('profiles').select('id').eq('top_leads_access', true),
+        ])
+        trophyUserIdsRef.current = (trophyProfiles ?? []).map((p: any) => p.id)
         const grouped = new Map<string, any[]>()
         for (const s of sessions ?? []) {
           const arr = grouped.get(s.contact_id) ?? []
