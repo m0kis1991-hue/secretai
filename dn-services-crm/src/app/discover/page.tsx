@@ -38,7 +38,10 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { useState, useEffect, useRef } from "react"
 import type { PublicLead } from "@/ai/flows/find-public-leads-flow"
 
-type FindPublicLeadsOutput = { leads: PublicLead[]; summary: string; topLeadsMode?: boolean }
+// Extends the AI flow's lead with local dedup state — set when a lead's phone matches a contact
+// already in the CRM, so the result can say why it can't be imported instead of just vanishing.
+type DiscoverLead = PublicLead & { alreadyInCRM?: string }
+type FindPublicLeadsOutput = { leads: DiscoverLead[]; summary: string; topLeadsMode?: boolean }
 import { useToast } from "@/hooks/use-toast"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
@@ -66,6 +69,20 @@ function buildPhoneSet(rows: Array<{ phone?: string | null }>): Set<string> {
     phones.forEach(p => { if (p) s.add(normalizePhone(p)) })
   }
   return s
+}
+
+// Same as buildPhoneSet but keeps the matched contact's name, so a "already in CRM" result can
+// say which existing contact it collides with instead of just vanishing from the results.
+function buildPhoneMap(rows: Array<{ name?: string | null; phone?: string | null }>): Map<string, string> {
+  const m = new Map<string, string>()
+  for (const r of rows) {
+    if (!r.phone) continue
+    const phones: string[] = r.phone.startsWith('[')
+      ? (() => { try { return JSON.parse(r.phone) as string[] } catch { return [r.phone] } })()
+      : [r.phone]
+    phones.forEach(p => { if (p) m.set(normalizePhone(p), r.name ?? '') })
+  }
+  return m
 }
 
 // ── Investor profile quick-select chips ──────────────────────────────────────
@@ -241,23 +258,29 @@ export default function DiscoverLeadsPage() {
       }
       const data: FindPublicLeadsOutput = await res.json()
 
-      // Filter out leads whose phone already exists in the CRM (handles plain string and JSON array formats)
+      // Mark (never silently drop) leads whose phone already exists in the CRM — a business the
+      // telephonist found via Google and searched for here should still show up in the results
+      // even if it can't be re-imported, otherwise a hit that's already in the CRM looks
+      // identical to a search that found nothing at all.
       const supabase = createClient()
-      const { data: existingContacts } = await supabase.from('contacts').select('phone')
-      const existingSet = buildPhoneSet(existingContacts ?? [])
-      const newLeads = data.leads.filter((l: PublicLead) => {
+      const { data: existingContacts } = await supabase.from('contacts').select('name, phone')
+      const existingMap = buildPhoneMap(existingContacts ?? [])
+      const markedLeads: DiscoverLead[] = data.leads.map(l => {
         const lPhones = l.phones ?? [l.phone]
-        return !lPhones.some(p => existingSet.has(normalizePhone(p)))
+        const match = lPhones.map(p => existingMap.get(normalizePhone(p))).find(Boolean)
+        return match ? { ...l, alreadyInCRM: match } : l
       })
-      const alreadyInCRM = data.leads.length - newLeads.length
-      const dedupeNote = alreadyInCRM > 0
+      // New leads first so they're not pushed to a later page by duplicates.
+      markedLeads.sort((a, b) => Number(!!a.alreadyInCRM) - Number(!!b.alreadyInCRM))
+      const dupCount = markedLeads.filter(l => l.alreadyInCRM).length
+      const dedupeNote = dupCount > 0
         ? (lang === 'el'
-            ? ` · ${alreadyInCRM} υπάρχουν ήδη στο CRM σας — εμφανίζονται ${newLeads.length} νέες.`
-            : ` · ${alreadyInCRM} already in your CRM — showing ${newLeads.length} new.`)
+            ? ` · ${dupCount} υπάρχουν ήδη στο CRM σας (επισημασμένες παρακάτω).`
+            : ` · ${dupCount} are already in your CRM (marked below).`)
         : ''
       const filtered: FindPublicLeadsOutput = {
         ...data,
-        leads: newLeads,
+        leads: markedLeads,
         summary: data.summary + dedupeNote,
       }
       setResults(filtered)
@@ -363,14 +386,17 @@ export default function DiscoverLeadsPage() {
   }
 
   const toggleSelectPage = () => {
-    const pageIds = paginated.map((_, relIdx) => ((safePage - 1) * PAGE_SIZE + relIdx).toString())
-    const allPageSelected = pageIds.every(id => selectedIds.has(id) || addedIds.has(id))
+    const selectablePageIds = paginated
+      .map((lead, relIdx) => ({ lead, id: ((safePage - 1) * PAGE_SIZE + relIdx).toString() }))
+      .filter(({ lead }) => !lead.alreadyInCRM)
+      .map(({ id }) => id)
+    const allPageSelected = selectablePageIds.every(id => selectedIds.has(id) || addedIds.has(id))
     setSelectedIds(prev => {
       const next = new Set(prev)
       if (allPageSelected) {
-        pageIds.forEach(id => next.delete(id))
+        selectablePageIds.forEach(id => next.delete(id))
       } else {
-        pageIds.filter(id => !addedIds.has(id)).forEach(id => next.add(id))
+        selectablePageIds.filter(id => !addedIds.has(id)).forEach(id => next.add(id))
       }
       return next
     })
@@ -382,7 +408,7 @@ export default function DiscoverLeadsPage() {
     profileLabel: lang === 'el' ? 'Επενδυτικό Προφίλ' : 'Investor Profile',
     profileDesc: lang === 'el' ? 'Επιλέξτε κατηγορία ή πληκτρολογήστε ελεύθερα παρακάτω' : 'Select a category or type freely below',
     category: lang === 'el' ? 'Ειδικότητα / Κλάδος' : 'Specialty / Industry',
-    categoryPlaceholder: lang === 'el' ? 'π.χ. Γιατροί, Δικηγόροι, Λογιστές' : 'e.g. Doctors, Lawyers, Accountants',
+    categoryPlaceholder: lang === 'el' ? 'π.χ. Γιατροί, Δικηγόροι — ή το ακριβές όνομα μιας επιχείρησης' : 'e.g. Doctors, Lawyers — or a specific business name',
     location: lang === 'el' ? 'Περιοχή (κενό = όλη η Ελλάδα)' : 'Location (empty = all Greece)',
     locationPlaceholder: lang === 'el' ? 'π.χ. Αθήνα, Θεσσαλονίκη, Κηφισιά' : 'e.g. Athens, Thessaloniki',
     searchBtn: lang === 'el' ? 'Έξυπνη Εύρεση' : 'Smart Search',
@@ -596,10 +622,10 @@ export default function DiscoverLeadsPage() {
                       className="flex-1 sm:flex-none h-9 text-xs"
                       onClick={toggleSelectPage}
                     >
-                      {paginated.every((_, relIdx) => {
-                        const id = ((safePage - 1) * PAGE_SIZE + relIdx).toString()
-                        return selectedIds.has(id) || addedIds.has(id)
-                      }) ? (
+                      {paginated
+                        .map((lead, relIdx) => ({ lead, id: ((safePage - 1) * PAGE_SIZE + relIdx).toString() }))
+                        .filter(({ lead }) => !lead.alreadyInCRM)
+                        .every(({ id }) => selectedIds.has(id) || addedIds.has(id)) ? (
                         <><CheckSquare className="mr-1.5 h-3.5 w-3.5" /> {t.deselectPage}</>
                       ) : (
                         <><Square className="mr-1.5 h-3.5 w-3.5" /> {t.selectPage}</>
@@ -623,6 +649,7 @@ export default function DiscoverLeadsPage() {
                     const idxStr = absIdx.toString()
                     const isAdded = addedIds.has(idxStr)
                     const isSelected = selectedIds.has(idxStr)
+                    const isDup = !!lead.alreadyInCRM
                     const leadPhones = lead.phones ?? [lead.phone]
                     const isMobile = leadPhones.some(ph => /^(\+30)?69\d{8}$/.test(ph.replace(/\s/g, '')))
                     return (
@@ -630,6 +657,7 @@ export default function DiscoverLeadsPage() {
                         key={absIdx}
                         className={cn(
                           "transition-all group overflow-hidden border-l-4",
+                          isDup ? "border-l-muted-foreground/30 opacity-70" :
                           isAdded ? "border-l-green-500 opacity-60" :
                           isSelected ? "border-l-primary border-primary/50 bg-primary/5 shadow-md" :
                           "border-l-accent hover:border-primary"
@@ -638,7 +666,7 @@ export default function DiscoverLeadsPage() {
                         <CardHeader className="pb-2">
                           <div className="flex justify-between items-start gap-2">
                             <div className="flex items-center gap-2 min-w-0">
-                              {!isAdded && (
+                              {!isAdded && !isDup && (
                                 <Checkbox
                                   checked={isSelected}
                                   onCheckedChange={(checked) => {
@@ -655,6 +683,11 @@ export default function DiscoverLeadsPage() {
                               <CardTitle className="text-base font-bold truncate group-hover:text-primary transition-colors">{lead.name}</CardTitle>
                             </div>
                             <div className="flex gap-1 shrink-0 flex-wrap justify-end">
+                              {isDup && (
+                                <Badge variant="outline" className="text-[9px] px-1.5 text-muted-foreground border-muted-foreground/40">
+                                  {lang === 'el' ? 'Ήδη στο CRM' : 'Already in CRM'}
+                                </Badge>
+                              )}
                               {topLeadsAccess && lead.rating !== undefined && lead.reviewCount !== undefined && lead.rating >= 4.5 && lead.reviewCount >= 90 && (
                                 <Badge className="text-[9px] bg-amber-500 text-white px-1.5 gap-0.5 font-bold">
                                   <Star className="h-2.5 w-2.5 fill-white" />{lead.rating.toFixed(1)}
@@ -691,17 +724,25 @@ export default function DiscoverLeadsPage() {
                                 )}
                               </div>
                             )}
+                            {isDup && (
+                              <p className="text-[11px] text-muted-foreground italic pt-1">
+                                {lang === 'el' ? `Υπάρχει ήδη στο CRM ως: ${lead.alreadyInCRM}` : `Already saved in your CRM as: ${lead.alreadyInCRM}`}
+                              </p>
+                            )}
                           </div>
                           <Separator className="bg-muted/50" />
                           <Button
+                            variant={isDup ? "outline" : "default"}
                             className={cn(
                               "w-full gap-2 h-11",
                               isAdded ? "bg-green-500 hover:bg-green-500" : ""
                             )}
                             onClick={() => handleAddToCRM(lead, absIdx)}
-                            disabled={isAdded}
+                            disabled={isAdded || isDup}
                           >
-                            {isAdded ? (
+                            {isDup ? (
+                              <><CheckCircle2 className="h-4 w-4" /> {lang === 'el' ? 'Ήδη υπάρχει' : 'Already exists'}</>
+                            ) : isAdded ? (
                               <><CheckCircle2 className="h-4 w-4" /> {t.added}</>
                             ) : (
                               <><Plus className="h-4 w-4" /> {t.addToCrm}</>
