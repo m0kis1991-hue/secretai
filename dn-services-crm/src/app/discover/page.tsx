@@ -33,20 +33,23 @@ import {
   Square,
   CheckSquare,
   Trophy,
+  ExternalLink,
 } from "lucide-react"
 import { Checkbox } from "@/components/ui/checkbox"
 import { useState, useEffect, useRef } from "react"
 import type { PublicLead } from "@/ai/flows/find-public-leads-flow"
 
 // Extends the AI flow's lead with local dedup state — set when a lead's phone matches a contact
-// already in the CRM, so the result can say why it can't be imported instead of just vanishing.
-type DiscoverLead = PublicLead & { alreadyInCRM?: string }
+// already in the CRM, so the result can say why it can't be imported instead of just vanishing,
+// and link straight to it (otherwise "already in CRM" still reads as "can't find it").
+type DiscoverLead = PublicLead & { alreadyInCRM?: { id: string; name: string } }
 type FindPublicLeadsOutput = { leads: DiscoverLead[]; summary: string; topLeadsMode?: boolean }
 import { useToast } from "@/hooks/use-toast"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { cn } from "@/lib/utils"
 import { createClient } from "@/lib/supabase/client"
+import Link from "next/link"
 
 const PAGE_SIZE = 30
 
@@ -71,16 +74,17 @@ function buildPhoneSet(rows: Array<{ phone?: string | null }>): Set<string> {
   return s
 }
 
-// Same as buildPhoneSet but keeps the matched contact's name, so a "already in CRM" result can
-// say which existing contact it collides with instead of just vanishing from the results.
-function buildPhoneMap(rows: Array<{ name?: string | null; phone?: string | null }>): Map<string, string> {
-  const m = new Map<string, string>()
+// Same as buildPhoneSet but keeps the matched contact's id/name, so an "already in CRM" result
+// can say which existing contact it collides with — and link straight to it — instead of just
+// vanishing from the results.
+function buildPhoneMap(rows: Array<{ id: string; name?: string | null; phone?: string | null }>): Map<string, { id: string; name: string }> {
+  const m = new Map<string, { id: string; name: string }>()
   for (const r of rows) {
     if (!r.phone) continue
     const phones: string[] = r.phone.startsWith('[')
       ? (() => { try { return JSON.parse(r.phone) as string[] } catch { return [r.phone] } })()
       : [r.phone]
-    phones.forEach(p => { if (p) m.set(normalizePhone(p), r.name ?? '') })
+    phones.forEach(p => { if (p) m.set(normalizePhone(p), { id: r.id, name: r.name ?? '' }) })
   }
   return m
 }
@@ -263,7 +267,7 @@ export default function DiscoverLeadsPage() {
       // even if it can't be re-imported, otherwise a hit that's already in the CRM looks
       // identical to a search that found nothing at all.
       const supabase = createClient()
-      const { data: existingContacts } = await supabase.from('contacts').select('name, phone')
+      const { data: existingContacts } = await supabase.from('contacts').select('id, name, phone')
       const existingMap = buildPhoneMap(existingContacts ?? [])
       const markedLeads: DiscoverLead[] = data.leads.map(l => {
         const lPhones = l.phones ?? [l.phone]
@@ -726,28 +730,33 @@ export default function DiscoverLeadsPage() {
                             )}
                             {isDup && (
                               <p className="text-[11px] text-muted-foreground italic pt-1">
-                                {lang === 'el' ? `Υπάρχει ήδη στο CRM ως: ${lead.alreadyInCRM}` : `Already saved in your CRM as: ${lead.alreadyInCRM}`}
+                                {lang === 'el' ? `Υπάρχει ήδη στο CRM ως: ${lead.alreadyInCRM!.name}` : `Already saved in your CRM as: ${lead.alreadyInCRM!.name}`}
                               </p>
                             )}
                           </div>
                           <Separator className="bg-muted/50" />
-                          <Button
-                            variant={isDup ? "outline" : "default"}
-                            className={cn(
-                              "w-full gap-2 h-11",
-                              isAdded ? "bg-green-500 hover:bg-green-500" : ""
-                            )}
-                            onClick={() => handleAddToCRM(lead, absIdx)}
-                            disabled={isAdded || isDup}
-                          >
-                            {isDup ? (
-                              <><CheckCircle2 className="h-4 w-4" /> {lang === 'el' ? 'Ήδη υπάρχει' : 'Already exists'}</>
-                            ) : isAdded ? (
-                              <><CheckCircle2 className="h-4 w-4" /> {t.added}</>
-                            ) : (
-                              <><Plus className="h-4 w-4" /> {t.addToCrm}</>
-                            )}
-                          </Button>
+                          {isDup ? (
+                            <Link href={`/contacts/details?id=${lead.alreadyInCRM!.id}`}>
+                              <Button variant="outline" className="w-full gap-2 h-11">
+                                <ExternalLink className="h-4 w-4" /> {lang === 'el' ? 'Άνοιγμα στο CRM' : 'Open in CRM'}
+                              </Button>
+                            </Link>
+                          ) : (
+                            <Button
+                              className={cn(
+                                "w-full gap-2 h-11",
+                                isAdded ? "bg-green-500 hover:bg-green-500" : ""
+                              )}
+                              onClick={() => handleAddToCRM(lead, absIdx)}
+                              disabled={isAdded}
+                            >
+                              {isAdded ? (
+                                <><CheckCircle2 className="h-4 w-4" /> {t.added}</>
+                              ) : (
+                                <><Plus className="h-4 w-4" /> {t.addToCrm}</>
+                              )}
+                            </Button>
+                          )}
                         </CardContent>
                       </Card>
                     )
