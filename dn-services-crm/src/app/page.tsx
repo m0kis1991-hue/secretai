@@ -88,7 +88,7 @@ type TelephonistStat = {
   id: string
   name: string
   ownedContacts: number
-  byStatus: { new: number; canva: number; probable: number; bought: number; not_buying: number; no_answer: number; likely_sale: number; likely_antisale: number; another_time: number; email: number }
+  byStatus: { new: number; canva: number; probable: number; bought: number; not_buying: number; no_answer: number; likely_sale: number; likely_antisale: number; another_time: number; email: number; left: number; return: number }
   callsToday: number
   callsWeek: number
   callsDetail: Array<{ contact_id: string; contact_name: string; called_at: string }>
@@ -309,6 +309,7 @@ export default function DashboardPage() {
           another_time: cnt('another_time'),
           email: cnt('email'),
           bought: cnt('bought'), not_buying: cnt('not_buying'), no_answer: cnt('no_answer'),
+          left: cnt('left'), return: cnt('return'),
         }
         const ownedContacts = Array.from(statusMap.values()).reduce((s, r) => s + Number(r.cnt), 0)
         const followUpsToday = Array.from(statusMap.values()).reduce((s, r) => s + Number(r.next_action_today), 0)
@@ -563,6 +564,8 @@ export default function DashboardPage() {
     { status: 'new',             nameEl: 'Νέοι',               nameEn: 'New',           color: COLORS[2] },
     { status: 'not_buying',      nameEl: 'Δεν Ενδιαφέρονται', nameEn: 'Not Interested', color: COLORS[3] },
     { status: 'no_answer',       nameEl: 'Δεν Απάντησε',       nameEn: 'No Answer',     color: '#f97316' },
+    { status: 'left',            nameEl: 'Έφυγαν',             nameEn: 'Left',          color: '#64748b' },
+    { status: 'return',          nameEl: 'Επιστροφή',          nameEn: 'Return',        color: '#06b6d4' },
   ], [])
 
   const pieData = useMemo(() =>
@@ -1282,6 +1285,8 @@ export default function DashboardPage() {
                               { key: 'bought',       count: stat.byStatus.bought,       dot: 'bg-green-500',  label: lang === 'el' ? 'Αγόρασε' : 'Bought',                text: `${stat.byStatus.bought}` },
                               { key: 'no_answer',    count: stat.byStatus.no_answer,    dot: 'bg-orange-400', label: lang === 'el' ? 'Δεν απάντησε' : 'No answer',        text: `${stat.byStatus.no_answer}` },
                               { key: 'not_buying',   count: stat.byStatus.not_buying,   dot: 'bg-red-400',    label: lang === 'el' ? 'Δεν αγοράζει' : 'Not buying',       text: `${stat.byStatus.not_buying}` },
+                              { key: 'left',         count: stat.byStatus.left,         dot: 'bg-slate-500',  label: lang === 'el' ? 'Έφυγαν' : 'Left',                   text: `${stat.byStatus.left}` },
+                              { key: 'return',       count: stat.byStatus.return,       dot: 'bg-cyan-500',   label: lang === 'el' ? 'Επιστροφή' : 'Return',              text: `${stat.byStatus.return}` },
                             ] : [
                               { key: 'new',             count: stat.byStatus.new,             dot: 'bg-blue-400',  label: lang === 'el' ? 'Νέοι' : 'New',                  text: `${stat.byStatus.new}` },
                               { key: 'canva',           count: stat.byStatus.canva,           dot: 'bg-purple-500',label: 'Canva',                                         text: `${stat.byStatus.canva}` },

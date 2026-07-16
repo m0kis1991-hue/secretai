@@ -232,7 +232,7 @@ const PAGE_SIZE = 10
 
 const todayISO = () => new Date().toISOString().slice(0, 10)
 
-type FilterKey = 'all' | 'today' | 'high' | 'new' | 'canva' | 'probable' | 'likely_sale' | 'likely_antisale' | 'another_time' | 'email' | 'no_answer' | 'not_buying' | 'bought' | 'few_reviews'
+type FilterKey = 'all' | 'today' | 'high' | 'new' | 'canva' | 'probable' | 'likely_sale' | 'likely_antisale' | 'another_time' | 'email' | 'no_answer' | 'not_buying' | 'bought' | 'few_reviews' | 'left' | 'return'
 
 const STATUS_COLS: { key: LeadStatus; labelEl: string; labelEn: string; color: string }[] = [
   { key: STATUS.NEW,             labelEl: 'Νέο',           labelEn: 'New',       color: 'border-t-blue-400' },
@@ -252,6 +252,8 @@ const TROPHY_STATUS_COLS: { key: LeadStatus; labelEl: string; labelEn: string; c
   { key: STATUS.FEW_REVIEWS, labelEl: 'Λίγες Αξιολογήσεις',  labelEn: 'Few Reviews', color: 'border-t-sky-400' },
   { key: STATUS.NO_ANSWER,   labelEl: 'Δεν Απάντησε',        labelEn: 'No Answer',   color: 'border-t-orange-400' },
   { key: STATUS.NOT_BUYING,  labelEl: 'Όχι',                  labelEn: 'Declined',    color: 'border-t-red-400' },
+  { key: STATUS.LEFT,        labelEl: 'Έφυγαν',               labelEn: 'Left',        color: 'border-t-slate-500' },
+  { key: STATUS.RETURN,      labelEl: 'Επιστροφή',            labelEn: 'Return',      color: 'border-t-cyan-500' },
   { key: STATUS.BOUGHT,      labelEl: 'Αγόρασε',              labelEn: 'Bought',      color: 'border-t-green-500' },
 ]
 
@@ -282,7 +284,7 @@ export default function ContactsPage() {
   const pageJumpRef = useRef<HTMLInputElement>(null)
   const [activeFilter, setActiveFilter] = useState<FilterKey>(() => {
     try {
-      const VALID: FilterKey[] = ['all','today','high','new','canva','probable','likely_sale','likely_antisale','another_time','email','no_answer','not_buying','bought','few_reviews']
+      const VALID: FilterKey[] = ['all','today','high','new','canva','probable','likely_sale','likely_antisale','another_time','email','no_answer','not_buying','bought','few_reviews','left','return']
       const stored = sessionStorage.getItem('contacts-filter') as FilterKey
       return VALID.includes(stored) ? stored : 'all'
     } catch { return 'all' }
@@ -1046,6 +1048,8 @@ export default function ContactsPage() {
       case 'not_buying':      return st === 'not_buying'
       case 'bought':          return st === 'bought'
       case 'few_reviews':     return st === 'few_reviews'
+      case 'left':            return st === 'left'
+      case 'return':          return st === 'return'
       default: return true
     }
   }
@@ -1147,7 +1151,20 @@ export default function ContactsPage() {
     window.open(`https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(contact.email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`, '_blank')
   }
 
-  const handleStatusChange = async (id: string, status: LeadStatus) => {
+  // Logs a sale from a quick status change (kanban / inline table) — the full details-page save
+  // already logs one via its own amount field, but the quick paths never did, so a trophy
+  // telephonist marking contacts "Αγόρασε" from the board instead of opening each one had every
+  // sale silently missing from admin's per-telephonist totals.
+  const logQuickSale = async (contactId: string, contactName: string, telephonistId: string, telephonistName: string, amount: number) => {
+    const supabase = createClient()
+    await supabase.from('sales_logs').insert({
+      contact_id: contactId, contact_name: contactName,
+      telephonist_id: telephonistId, telephonist_name: telephonistName,
+      amount,
+    })
+  }
+
+  const handleStatusChange = async (id: string, status: LeadStatus, boughtAmount?: number) => {
     const supabase = createClient()
     if (topLeadsAccess && currentUserId) {
       // Trophy telephonist: always writes to their own session
@@ -1166,6 +1183,10 @@ export default function ContactsPage() {
         return next
       })
       setContacts(prev => prev.map(c => c.id === id ? { ...c, status } : c))
+      if (status === 'bought') {
+        const c = contacts.find(x => x.id === id)
+        logQuickSale(id, c?.name ?? '', currentUserId, userName, boughtAmount ?? 0)
+      }
     } else if (isAdmin && ownerScope === 'trophy') {
       // Admin in trophy scope: always sync via trophySync (server-side upsert), never write
       // contacts.status directly — trophy telephonists' own view ignores raw contacts.status for
@@ -1187,6 +1208,12 @@ export default function ContactsPage() {
         return
       }
       setContacts(prev => prev.map(c => c.id === id ? { ...c, status } : c))
+      if (status === 'bought' && sessionOwnerId) {
+        // Attribute the sale to the actual trophy telephonist working the contact, not to admin.
+        const ownerName = telephonists.find(t => t.id === sessionOwnerId)?.name
+          ?? (sessionOwnerId === currentUserId ? userName : '')
+        logQuickSale(id, targetContact?.name ?? '', sessionOwnerId, ownerName, boughtAmount ?? 0)
+      }
     } else {
       // Regular admin (non-trophy scope) or regular telephonist
       const { error } = await supabase.from('contacts').update({ status }).eq('id', id)
@@ -1196,6 +1223,27 @@ export default function ContactsPage() {
       }
       setContacts(prev => prev.map(c => c.id === id ? { ...c, status } : c))
     }
+  }
+
+  const [boughtPrompt, setBoughtPrompt] = useState<{ contactId: string; contactName: string } | null>(null)
+  const [boughtAmountInput, setBoughtAmountInput] = useState('')
+
+  // Entry point for every quick status change (kanban buttons, inline table select). Marking a
+  // trophy contact "bought" needs an amount for sales tracking to mean anything, so it detours
+  // through a small confirm dialog instead of firing straight through like every other status.
+  const requestStatusChange = (id: string, status: LeadStatus, contactName?: string) => {
+    if (status === 'bought' && (topLeadsAccess || (isAdmin && ownerScope === 'trophy'))) {
+      setBoughtAmountInput('')
+      setBoughtPrompt({ contactId: id, contactName: contactName ?? contacts.find(c => c.id === id)?.name ?? '' })
+      return
+    }
+    handleStatusChange(id, status)
+  }
+
+  const confirmBoughtAmount = () => {
+    if (!boughtPrompt) return
+    handleStatusChange(boughtPrompt.contactId, 'bought', Number(boughtAmountInput) || 0)
+    setBoughtPrompt(null)
   }
 
   const getStatusBadge = (status: string) => {
@@ -1210,6 +1258,8 @@ export default function ContactsPage() {
       case 'few_reviews':     return <Badge className="bg-sky-500 text-white text-[10px]">Λίγες Αξιολ.</Badge>
       case 'no_answer':       return <Badge className="bg-orange-500 hover:bg-orange-600 text-white text-[10px]">{lang === 'el' ? 'Δεν Απάντησε' : 'No Answer'}</Badge>
       case 'not_buying':      return <Badge variant="destructive" className="text-[10px]">{lang === 'el' ? 'Όχι' : 'No'}</Badge>
+      case 'left':            return <Badge className="bg-slate-500 text-white text-[10px]">{lang === 'el' ? 'Έφυγαν' : 'Left'}</Badge>
+      case 'return':          return <Badge className="bg-cyan-500 text-white text-[10px]">{lang === 'el' ? 'Επιστροφή' : 'Return'}</Badge>
       default:              return <Badge variant="secondary" className="text-[10px]">{lang === 'el' ? 'Νέο' : 'New'}</Badge>
     }
   }
@@ -1446,6 +1496,8 @@ export default function ContactsPage() {
     { key: 'few_reviews',   labelEl: 'Λίγες Αξιολογήσεις',  labelEn: 'Few Reviews' },
     { key: 'no_answer',     labelEl: 'Δεν Απάντησε',         labelEn: 'No Answer' },
     { key: 'not_buying',    labelEl: 'Όχι',                  labelEn: 'Declined' },
+    { key: 'left',          labelEl: 'Έφυγαν',               labelEn: 'Left' },
+    { key: 'return',        labelEl: 'Επιστροφή',            labelEn: 'Return' },
     { key: 'bought',        labelEl: 'Αγόρασαν',             labelEn: 'Bought' },
   ]
   const FILTERS: { key: FilterKey; labelEl: string; labelEn: string; badge?: number }[] =
@@ -1461,6 +1513,37 @@ export default function ContactsPage() {
       { key: 'not_buying',     labelEl: 'Δεν Αγοράζει',         labelEn: 'Not Buying' },
       { key: 'bought',         labelEl: 'Αγόρασαν',             labelEn: 'Bought' },
     ]
+
+  // Every trophy status except 'all'/'today' — the same set offered in the contact detail page's
+  // own status dropdown, reused here so the quick-change list never drifts out of sync with it.
+  const trophyStatusOptions = TROPHY_FILTERS.filter(f => f.key !== 'all' && f.key !== 'today')
+
+  // Status cell for the table/card list: a plain read-only badge for everyone except trophy
+  // telephonists and admin-in-trophy-scope, who get a quick-change dropdown instead — changing
+  // status without opening the contact. Regular telephonists' and admin's non-trophy views are
+  // untouched (still the plain badge).
+  const renderStatusCell = (contact: Contact) => {
+    const canQuickChange = (topLeadsAccess || (isAdmin && ownerScope === 'trophy')) && canEdit(contact)
+    if (!canQuickChange) return getStatusBadge(effectiveStatus(contact))
+    return (
+      <Select
+        value={effectiveStatus(contact)}
+        onValueChange={(v) => requestStatusChange(contact.id, v as LeadStatus, contact.name)}
+      >
+        <SelectTrigger
+          className="h-7 w-auto min-w-[104px] gap-1 border-dashed px-2 py-0 text-[11px] [&>span]:line-clamp-1"
+          onClick={e => e.stopPropagation()}
+        >
+          <SelectValue>{getStatusBadge(effectiveStatus(contact))}</SelectValue>
+        </SelectTrigger>
+        <SelectContent onClick={e => e.stopPropagation()}>
+          {trophyStatusOptions.map(s => (
+            <SelectItem key={s.key} value={s.key} className="text-xs">{lang === 'el' ? s.labelEl : s.labelEn}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    )
+  }
 
   return (
     <SidebarProvider>
@@ -1674,7 +1757,7 @@ export default function ContactsPage() {
                               <span className="text-[10px] text-muted-foreground mt-0.5 truncate">{contact.leadSource}</span>
                             ) : null}
                           </div>
-                          {getStatusBadge(effectiveStatus(contact))}
+                          {renderStatusCell(contact)}
                         </div>
                         <div className="flex items-center gap-3 mt-1">
                           {(() => {
@@ -1770,7 +1853,7 @@ export default function ContactsPage() {
                                 <span className="text-[10px]">{contact.priorityScore}%</span>
                               </div>
                             </TableCell>
-                            <TableCell>{getStatusBadge(effectiveStatus(contact))}</TableCell>
+                            <TableCell onClick={e => e.stopPropagation()}>{renderStatusCell(contact)}</TableCell>
                             <TableCell className="text-xs">
                               {(() => {
                                 const di = effectiveContactDate(contact)
@@ -1925,11 +2008,12 @@ export default function ContactsPage() {
             {/* ── KANBAN VIEW ─────────────────────────────────────────────── */}
             {!loadingContacts && view === 'kanban' && (
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                {(topLeadsAccess ? TROPHY_STATUS_COLS : STATUS_COLS).map(col => {
+                {((topLeadsAccess || (isAdmin && ownerScope === 'trophy')) ? TROPHY_STATUS_COLS : STATUS_COLS).map(col => {
+                  const isTrophyBoard = topLeadsAccess || (isAdmin && ownerScope === 'trophy')
                   const colContacts = filtered
                     .filter(c => {
                       const st = effectiveStatus(c)
-                      const mapped = topLeadsAccess && st === STATUS.LIKELY_ANTISALE ? STATUS.LIKELY_SALE : st
+                      const mapped = isTrophyBoard && st === STATUS.LIKELY_ANTISALE ? STATUS.LIKELY_SALE : st
                       return mapped === col.key
                     })
                     .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
@@ -2001,10 +2085,10 @@ export default function ContactsPage() {
                                 </div>
                                 {canEdit(contact) && (
                                   <div className="flex gap-0.5 flex-wrap pt-0.5" onClick={e => e.stopPropagation()}>
-                                    {(topLeadsAccess ? TROPHY_STATUS_COLS : STATUS_COLS).filter(s => s.key !== col.key).map(s => (
+                                    {((topLeadsAccess || (isAdmin && ownerScope === 'trophy')) ? TROPHY_STATUS_COLS : STATUS_COLS).filter(s => s.key !== col.key).map(s => (
                                       <button key={s.key}
                                         className="text-[10px] px-2 py-1 min-h-[28px] rounded bg-muted hover:bg-muted-foreground/20 text-muted-foreground font-medium transition-colors"
-                                        onClick={() => handleStatusChange(contact.id, s.key)}>
+                                        onClick={() => requestStatusChange(contact.id, s.key, contact.name)}>
                                         → {lang === 'el' ? s.labelEl : s.labelEn}
                                       </button>
                                     ))}
@@ -2351,6 +2435,41 @@ export default function ContactsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Quick "Αγόρασε" from kanban/table asks for the sale amount before committing — otherwise
+          it's the only quick status change that silently produced no sales_logs row at all. */}
+      <Dialog open={!!boughtPrompt} onOpenChange={(open) => { if (!open) setBoughtPrompt(null) }}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader>
+            <DialogTitle className="text-sm">
+              {lang === 'el' ? 'Ποσό πώλησης' : 'Sale amount'}
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-xs text-muted-foreground -mt-2">{boughtPrompt?.contactName}</p>
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">€</span>
+            <Input
+              type="number"
+              min="0"
+              step="any"
+              autoFocus
+              className="pl-7 h-11 text-base"
+              placeholder="0"
+              value={boughtAmountInput}
+              onChange={e => setBoughtAmountInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') confirmBoughtAmount() }}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBoughtPrompt(null)}>
+              {lang === 'el' ? 'Ακύρωση' : 'Cancel'}
+            </Button>
+            <Button onClick={confirmBoughtAmount} className="bg-green-500 hover:bg-green-600 text-white">
+              {lang === 'el' ? 'Επιβεβαίωση' : 'Confirm'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
     </SidebarProvider>
   )

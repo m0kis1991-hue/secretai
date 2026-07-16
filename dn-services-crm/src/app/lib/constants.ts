@@ -30,6 +30,10 @@ export const STATUS = {
   NO_ANSWER:       'no_answer',
   BOUGHT:          'bought',
   FEW_REVIEWS:     'few_reviews',
+  // Trophy-only — never written to contacts.status (which has a DB CHECK constraint that
+  // doesn't list these), always to trophy_contact_sessions.status (plain unconstrained text).
+  LEFT:            'left',
+  RETURN:          'return',
 } as const
 
 export type LeadStatus = typeof STATUS[keyof typeof STATUS]
