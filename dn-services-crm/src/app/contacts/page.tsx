@@ -1130,6 +1130,27 @@ export default function ContactsPage() {
     // Trophy sort is done server-side (rating DESC, review_count DESC, created_at DESC)
   }, [contacts, searchTerm, activeFilter, categoryFilter, topLeadsAccess, trophySessions, isAdmin, currentUserId, ownerScope, view])
 
+  // Kanban board grouping, memoized. The board previously re-ran a filter+sort pass over the
+  // whole `filtered` list once per status column (8-11x) inline during render, and any re-render
+  // — the 60s admin poll, a realtime event from any telephonist, search debounce, etc. — redid
+  // all of that work even when unrelated to the kanban view. Grouping once here keeps the exact
+  // same per-card contents/order, just computed once per actual data change instead of per render.
+  const isTrophyBoard = topLeadsAccess || (isAdmin && ownerScope === 'trophy')
+  const kanbanColumns = useMemo(() => {
+    const groups = new Map<string, Contact[]>()
+    for (const c of filtered) {
+      const st = effectiveStatus(c)
+      const mapped = isTrophyBoard && st === STATUS.LIKELY_ANTISALE ? STATUS.LIKELY_SALE : st
+      const arr = groups.get(mapped)
+      if (arr) arr.push(c); else groups.set(mapped, [c])
+    }
+    for (const arr of groups.values()) {
+      arr.sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
+    }
+    return groups
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered, isTrophyBoard, trophySessions, currentUserId, topLeadsAccess])
+
   // Admin uses server-side pagination: totalCount drives page count, contacts is the current page.
   // For trophy scope with a status filter, use filtered (client-side status filter) for display
   // so that realtime status changes move contacts out of the wrong category immediately.
@@ -2020,14 +2041,7 @@ export default function ContactsPage() {
             {!loadingContacts && view === 'kanban' && (
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                 {((topLeadsAccess || (isAdmin && ownerScope === 'trophy')) ? TROPHY_STATUS_COLS : STATUS_COLS).map(col => {
-                  const isTrophyBoard = topLeadsAccess || (isAdmin && ownerScope === 'trophy')
-                  const colContacts = filtered
-                    .filter(c => {
-                      const st = effectiveStatus(c)
-                      const mapped = isTrophyBoard && st === STATUS.LIKELY_ANTISALE ? STATUS.LIKELY_SALE : st
-                      return mapped === col.key
-                    })
-                    .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
+                  const colContacts = kanbanColumns.get(col.key) ?? []
                   return (
                     <div key={col.key} className="flex flex-col gap-2">
                       <div className="flex items-center justify-between px-1">
