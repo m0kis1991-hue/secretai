@@ -312,6 +312,14 @@ export default function ContactsPage() {
     try { return (sessionStorage.getItem('contacts-scope') as 'all' | 'trophy' | 'regular') || 'all' } catch { return 'all' }
   })
   const loadIdRef = useRef(0)
+  // Skip-if-busy guard: several effects (bootstrap, filter/search/page/scope changes, the 60s
+  // admin poll, realtime handlers) can all end up calling loadContacts around the same render —
+  // loadIdRef alone only discards a stale call's *results*, it doesn't stop the query itself from
+  // firing, so bursts of 2-3 concurrent full loads (each running several sub-queries against
+  // contacts/trophy_contact_sessions) were previously landing on Postgres at once. Every caller
+  // already re-reads paramsRef for the latest filters, so skipping an overlapping call is safe —
+  // the next trigger (debounce, poll, or the user's own next click) picks up current state anyway.
+  const loadingRef = useRef(false)
   // Tracks which contacts the current user has their own trophy session for (own session takes priority)
   const myTrophyContactIds = useRef<Set<string>>(new Set())
   // IDs of profiles with top_leads_access (trophy telephonists) — used for admin scope filter
@@ -329,6 +337,8 @@ export default function ContactsPage() {
 
   // Stable loadContacts — no stale closure issues because it reads from paramsRef
   const loadContacts = useCallback(async (boot?: { userId: string; role: string; excludeIds: string[]; tla: boolean }) => {
+    if (loadingRef.current) return
+    loadingRef.current = true
     const myId = ++loadIdRef.current
     setLoadingContacts(true)
 
@@ -671,6 +681,7 @@ export default function ContactsPage() {
       }
     } finally {
       if (myId === loadIdRef.current) setLoadingContacts(false)
+      loadingRef.current = false
     }
   }, []) // stable — reads from paramsRef
 
