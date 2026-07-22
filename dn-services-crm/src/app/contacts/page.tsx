@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import {
   Search, Plus, Upload, ChevronLeft, ChevronRight,
-  Download, LayoutList, Columns3, Phone, Calendar, Lock, RefreshCcw, Bell, ExternalLink, Send, Filter, X, Layers, Trash2, CheckSquare, Star, Crown, Users,
+  Download, LayoutList, Columns3, Phone, Calendar, Lock, RefreshCcw, Bell, ExternalLink, Send, Filter, X, Layers, Trash2, CheckSquare, Star, Crown, Users, Euro,
 } from "lucide-react"
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useRouter } from "next/navigation"
@@ -55,7 +55,12 @@ function buildExistingPhoneMap(rows: Array<{ id?: string; name?: string; phone?:
 
 // ── Date helpers ─────────────────────────────────────────────────────────────
 
-type ContactDateInfo = { date: string; type: 'followup' | 'called' | 'created' }
+type ContactDateInfo = { date: string; type: 'followup' | 'called' | 'created' | 'bought' }
+
+// Trophy session snapshot kept client-side per contact — updatedAt is the trophy_contact_sessions
+// row's own timestamp, reused as the "bought at" moment when status is 'bought' (no separate
+// purchase-date column needed since the session is already re-stamped on every status change).
+type TrophySessionInfo = { status: string; nextActionDate?: string | null; nextActionTime?: string | null; updatedAt?: string | null }
 
 function getContactDate(contact: Contact): ContactDateInfo | null {
   if (contact.nextActionDate) return { date: contact.nextActionDate.slice(0, 10), type: 'followup' }
@@ -68,6 +73,12 @@ function formatDateShort(iso: string): string {
   if (!iso) return ''
   const d = new Date(iso)
   return isNaN(d.getTime()) ? iso : d.toLocaleDateString('el-GR', { day: '2-digit', month: '2-digit', year: '2-digit' })
+}
+
+function formatTimeShort(iso: string): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return isNaN(d.getTime()) ? '' : d.toLocaleTimeString('el-GR', { hour: '2-digit', minute: '2-digit' })
 }
 
 function parsePhonesField(raw: string): string[] {
@@ -303,7 +314,7 @@ export default function ContactsPage() {
   const [telephonists, setTelephonists] = useState<{ id: string; name: string }[]>([])
   const [testUserIds, setTestUserIds] = useState<string[]>([])
   const [topLeadsAccess, setTopLeadsAccess] = useState(false)
-  const [trophySessions, setTrophySessions] = useState<Map<string, { status: string; nextActionDate?: string | null; nextActionTime?: string | null }>>(new Map())
+  const [trophySessions, setTrophySessions] = useState<Map<string, TrophySessionInfo>>(new Map())
   const [adminTrophyMap, setAdminTrophyMap] = useState<Map<string, string>>(new Map())
   const [adminTrophyOwnerMap, setAdminTrophyOwnerMap] = useState<Map<string, string>>(new Map())
   const [totalCount, setTotalCount] = useState(0)
@@ -742,7 +753,7 @@ export default function ContactsPage() {
           arr.push(s)
           grouped.set(s.contact_id, arr)
         }
-        const m = new Map<string, { status: string; nextActionDate?: string | null; nextActionTime?: string | null }>()
+        const m = new Map<string, TrophySessionInfo>()
         const ownIds = new Set<string>()
         for (const [contactId, rows] of grouped) {
           const own = rows.find(s => s.owner_id === myId)
@@ -752,6 +763,7 @@ export default function ContactsPage() {
             status: best.status,
             nextActionDate: best.next_action_date ?? null,
             nextActionTime: best.next_action_time ? (best.next_action_time as string).slice(0, 5) : null,
+            updatedAt: best.updated_at ?? null,
           })
         }
         myTrophyContactIds.current = ownIds
@@ -869,6 +881,7 @@ export default function ContactsPage() {
             status: row.status,
             nextActionDate: row.next_action_date ?? null,
             nextActionTime: row.next_action_time ? (row.next_action_time as string).slice(0, 5) : null,
+            updatedAt: row.updated_at ?? null,
           })
           return next
         })
@@ -889,13 +902,14 @@ export default function ContactsPage() {
       .order('updated_at', { ascending: false })
       .range(0, 9999)
       .then(({ data: sessions }) => {
-        const m = new Map<string, { status: string; nextActionDate?: string | null; nextActionTime?: string | null }>()
+        const m = new Map<string, TrophySessionInfo>()
         for (const s of sessions ?? []) {
           if (m.has(s.contact_id)) continue // already ordered by updated_at desc — first hit wins
           m.set(s.contact_id, {
             status: s.status,
             nextActionDate: s.next_action_date ?? null,
             nextActionTime: s.next_action_time ? (s.next_action_time as string).slice(0, 5) : null,
+            updatedAt: s.updated_at ?? null,
           })
         }
         setTrophySessions(m)
@@ -919,14 +933,14 @@ export default function ContactsPage() {
           myTrophyContactIds.current.add(row.contact_id)
           setTrophySessions(prev => {
             const next = new Map(prev)
-            next.set(row.contact_id, { status: row.status ?? 'new', nextActionDate: row.next_action_date ?? null, nextActionTime: row.next_action_time ? (row.next_action_time as string).slice(0, 5) : null })
+            next.set(row.contact_id, { status: row.status ?? 'new', nextActionDate: row.next_action_date ?? null, nextActionTime: row.next_action_time ? (row.next_action_time as string).slice(0, 5) : null, updatedAt: row.updated_at ?? null })
             return next
           })
         } else if (!myTrophyContactIds.current.has(row.contact_id)) {
           // Another trophy telephonist changed this contact and we don't have our own session — show their status
           setTrophySessions(prev => {
             const next = new Map(prev)
-            next.set(row.contact_id, { status: row.status ?? 'new', nextActionDate: row.next_action_date ?? null, nextActionTime: row.next_action_time ? (row.next_action_time as string).slice(0, 5) : null })
+            next.set(row.contact_id, { status: row.status ?? 'new', nextActionDate: row.next_action_date ?? null, nextActionTime: row.next_action_time ? (row.next_action_time as string).slice(0, 5) : null, updatedAt: row.updated_at ?? null })
             return next
           })
         }
@@ -1026,6 +1040,10 @@ export default function ContactsPage() {
   const effectiveContactDate = (contact: Contact): ContactDateInfo | null => {
     if (topLeadsAccess || isAdminTrophyView) {
       const session = trophySessions.get(contact.id)
+      // Bought contacts: show when the sale was recorded (session.updatedAt is re-stamped on every
+      // status change, so at status='bought' it IS the purchase moment) — full ISO kept in `date`
+      // so the render side can format both the date and local time from it.
+      if (session?.status === 'bought' && session.updatedAt) return { date: session.updatedAt, type: 'bought' }
       if (session?.nextActionDate) return { date: session.nextActionDate.slice(0, 10), type: 'followup' }
     }
     return getContactDate(contact)
@@ -1200,9 +1218,10 @@ export default function ContactsPage() {
     const supabase = createClient()
     if (topLeadsAccess && currentUserId) {
       // Trophy telephonist: always writes to their own session
+      const now = new Date().toISOString()
       const { error } = await supabase
         .from('trophy_contact_sessions')
-        .upsert({ contact_id: id, owner_id: currentUserId, status, updated_at: new Date().toISOString() }, { onConflict: 'contact_id,owner_id' })
+        .upsert({ contact_id: id, owner_id: currentUserId, status, updated_at: now }, { onConflict: 'contact_id,owner_id' })
       if (error) {
         toast({ variant: 'destructive', title: lang === 'el' ? 'Σφάλμα αλλαγής κατάστασης' : 'Status change error' })
         return
@@ -1211,7 +1230,7 @@ export default function ContactsPage() {
       setTrophySessions(prev => {
         const next = new Map(prev)
         const existing = next.get(id) ?? {}
-        next.set(id, { ...existing, status })
+        next.set(id, { ...existing, status, updatedAt: now })
         return next
       })
       setContacts(prev => prev.map(c => c.id === id ? { ...c, status } : c))
@@ -1803,6 +1822,14 @@ export default function ContactsPage() {
                                 {effectiveNextActionTime(contact) && <span className="text-[10px] text-amber-500 pl-4">{effectiveNextActionTime(contact)}</span>}
                               </span>
                             )
+                            if (di.type === 'bought') return (
+                              <span className="flex flex-col gap-0">
+                                <span className="text-[10px] text-green-600 font-medium flex items-center gap-1">
+                                  <Euro className="h-3 w-3" />{formatDateShort(di.date)}
+                                </span>
+                                <span className="text-[10px] text-green-500 pl-4">{formatTimeShort(di.date)}</span>
+                              </span>
+                            )
                             if (di.type === 'called') return (
                               <span className="flex flex-col gap-0">
                                 <span className="text-[10px] text-muted-foreground flex items-center gap-1">
@@ -1894,6 +1921,12 @@ export default function ContactsPage() {
                                   <span className="flex flex-col gap-0 text-amber-600 font-medium">
                                     <span className="flex items-center gap-1"><Calendar className="h-3 w-3 shrink-0" />{formatDateShort(di.date)}</span>
                                     {effectiveNextActionTime(contact) && <span className="text-[10px] pl-4 text-amber-500">{effectiveNextActionTime(contact)}</span>}
+                                  </span>
+                                )
+                                if (di.type === 'bought') return (
+                                  <span className="flex flex-col gap-0 text-green-600 font-medium">
+                                    <span className="flex items-center gap-1"><Euro className="h-3 w-3 shrink-0" />{formatDateShort(di.date)}</span>
+                                    <span className="text-[10px] pl-4 text-green-500">{formatTimeShort(di.date)}</span>
                                   </span>
                                 )
                                 if (di.type === 'called') return (
@@ -2081,6 +2114,14 @@ export default function ContactsPage() {
                                             <Calendar className="h-2.5 w-2.5 shrink-0" />{formatDateShort(di.date)}
                                           </span>
                                           {contact.nextActionTime && <span className="text-[9px] text-amber-500 pl-3">{contact.nextActionTime}</span>}
+                                        </span>
+                                      )
+                                      if (di.type === 'bought') return (
+                                        <span className="flex flex-col gap-0 mt-0.5">
+                                          <span className="text-[9px] text-green-600 font-medium flex items-center gap-0.5">
+                                            <Euro className="h-2.5 w-2.5 shrink-0" />{formatDateShort(di.date)}
+                                          </span>
+                                          <span className="text-[9px] text-green-500 pl-3">{formatTimeShort(di.date)}</span>
                                         </span>
                                       )
                                       if (di.type === 'called') return (
