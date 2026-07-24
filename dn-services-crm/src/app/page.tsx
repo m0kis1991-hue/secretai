@@ -102,6 +102,7 @@ type TelephonistStat = {
   salesDetail: Array<{ contact_id: string; contact_name: string; amount: number; logged_at: string }>
   contactsList: Array<{ id: string; name: string; status: string; lastContacted?: string | null }>
   conversionRate: number
+  topLeadsAccess: boolean
 }
 
 const detailedHistoryData = [
@@ -617,26 +618,29 @@ export default function DashboardPage() {
     // Lazy-load individual contacts for drill-down
     if (member.id) {
       if (member.topLeadsAccess) {
-        // Trophy telephonists: status + date live in trophy_contact_sessions, not contacts table
+        // Trophy telephonists: status + date live in trophy_contact_sessions, not contacts table.
+        // Embed the contact name via the FK (contacts(name)) instead of a follow-up `.in(id, [...])`
+        // lookup — a telephonist with hundreds of sessions (seen: 782 for one) built an `.in()` filter
+        // with hundreds of UUIDs, a URL long enough to fail against Supabase's gateway; the failure
+        // was never checked, so the drill-down silently rendered contacts with blank names — which is
+        // what showed up as "empty" when the admin opened it. A single embedded-select request has no
+        // such limit, and an explicit error check resets the loading state instead of spinning forever.
         const sc = createClient()
         sc.from('trophy_contact_sessions')
-          .select('contact_id, status, updated_at')
+          .select('contact_id, status, updated_at, contacts(name)')
           .eq('owner_id', member.id)
           .order('updated_at', { ascending: false })
-          .then(async ({ data: sessions }) => {
-            if (!sessions?.length) {
+          .then(({ data: sessions, error }) => {
+            if (error || !sessions?.length) {
               setSelectedTelephonist((prev: any) => prev ? { ...prev, contactsList: [], contactsListLoading: false } : prev)
               return
             }
-            const contactIds = [...new Set(sessions.map((s: any) => s.contact_id))]
-            const { data: contactsData } = await sc.from('contacts').select('id, name').in('id', contactIds)
-            const nameMap = new Map((contactsData ?? []).map((c: any) => [c.id, c.name ?? '']))
             const seen = new Set<string>()
             const contactsList = sessions
               .filter((s: any) => { if (seen.has(s.contact_id)) return false; seen.add(s.contact_id); return true })
               .map((s: any) => ({
                 id: s.contact_id,
-                name: nameMap.get(s.contact_id) ?? '',
+                name: (s.contacts as any)?.name ?? '',
                 status: s.status ?? 'new',
                 lastContacted: s.updated_at ? s.updated_at.slice(0, 10) : null,
               }))

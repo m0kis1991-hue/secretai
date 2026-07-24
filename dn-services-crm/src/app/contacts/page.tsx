@@ -527,10 +527,15 @@ export default function ContactsPage() {
       // ownerScope=all + probable: finds probable contacts in trophy sessions.
       if (isAdminRole(p.userRole) && !isKanban &&
           (p.ownerScope === 'trophy' || p.activeFilter === 'probable')) {
+        // Explicit range — without it, PostgREST applies its own default row cap (commonly 1000)
+        // and silently drops anything beyond that with no error; 'all'/'high' scope has no status
+        // filter at all here, so as the trophy pool keeps growing this was on track to eventually
+        // start quietly missing contacts from the list.
         let sessQ = supabase
           .from('trophy_contact_sessions')
           .select('contact_id, updated_at')
           .order('updated_at', { ascending: false })
+          .range(0, 9999)
         if (p.ownerScope === 'trophy') {
           // today: filter by session's next_action_date (trophy telephonists store dates in sessions, not contacts)
           if (p.activeFilter === 'today') sessQ = sessQ.eq('next_action_date', today)
@@ -654,15 +659,27 @@ export default function ContactsPage() {
             ? deduped.filter(c => !p.testUserIds.includes(c.ownerId ?? ''))
             : deduped
 
-          // For admin: overlay trophy session statuses so trophy contacts show correct status
+          // For admin: overlay trophy session statuses so trophy contacts show correct status.
+          // Chunked — a single .in() with hundreds of contact IDs (kanban can show up to 500) builds
+          // a URL long enough to fail against Supabase's gateway, the same bug class that silently
+          // blanked out contact names in the admin telephonist drill-down (see handleSelectTelephonist
+          // in page.tsx). Each contact's rows all land in exactly one chunk, so the per-contact
+          // most-recently-updated session is still picked correctly during dedup below.
           if (isAdminRole(p.userRole) && visible.length > 0) {
-            const { data: troData } = await supabase
-              .from('trophy_contact_sessions')
-              .select('contact_id, status, owner_id, updated_at')
-              .in('contact_id', visible.map(c => c.id))
-              .order('updated_at', { ascending: false })
-              .range(0, Math.max(4999, visible.length * 5 - 1))
+            const visibleIds = visible.map(c => c.id)
+            const CHUNK_SIZE = 200
+            const idChunks: string[][] = []
+            for (let i = 0; i < visibleIds.length; i += CHUNK_SIZE) idChunks.push(visibleIds.slice(i, i + CHUNK_SIZE))
+            const chunkResults = await Promise.all(idChunks.map(chunk =>
+              supabase
+                .from('trophy_contact_sessions')
+                .select('contact_id, status, owner_id, updated_at')
+                .in('contact_id', chunk)
+                .order('updated_at', { ascending: false })
+                .range(0, Math.max(999, chunk.length * 5 - 1))
+            ))
             if (myId !== loadIdRef.current) return
+            const troData = chunkResults.flatMap(r => r.data ?? [])
             const tMap = new Map<string, string>()
             const ownerMap = new Map<string, string>()
             for (const s of troData ?? []) {
