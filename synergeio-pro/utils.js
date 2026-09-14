@@ -239,14 +239,82 @@ window.U = (function () {
   }
 
   // ---- AI Scan: server route (Vercel) → client-side key fallback ----
-  const AI_PROMPT = `You are an expert OCR assistant for Greek vehicle registration certificates (Άδεια Κυκλοφορίας).
+  // Same guidance as api/ai-scan.js (plate-vs-document-number, VIN letter/digit
+  // disambiguation) so results are equally reliable whether the server route or a
+  // user-supplied key is used.
+  const AI_PROMPT = `You are an expert OCR assistant specialised in reading Greek vehicle registration certificates (Άδεια Κυκλοφορίας — green booklet issued by the Greek Ministry of Transport).
 
-PLATE: found on COVER page next to "(Α) ΑΡΙΘΜΟΣ ΚΥΚΛΟΦΟΡΙΑΣ". Do NOT use "ΑΡΙΘΜΟΣ ΕΓΓΡΑΦΟΥ" (that is the document number). Car plates: 3 Greek letters + 4 digits. Motorcycle: 3 letters + 3 digits.
+The Greek registration booklet has THREE distinct pages. Read ALL pages provided carefully:
 
-Fields in the VEHICLE DATA page: (4)=first reg year in Greece, (D.1)=brand, (D.3)=model, (E)=VIN 17chars, (J)=category(L3E/ΔΙΚΥΚΛΟ→moto,M1→car,N→truck), (P.1)=cc integer, (P.3)=fuel(ΒΕΝΖΙΝΗ→gasoline,ΠΕΤΡΕΛΑΙΟ→diesel,ΥΓΡΑΕΡΙΟ→lpg,ΥΒΡΙΔΙΚΟ→hybrid,ΗΛΕΚΤΡΙΚΟ→electric), (R)=color.
-Fields in the PERSONAL DATA page: (C.1.1)=surname, (C.1.2)=first name → ownerName="Firstname Lastname".
+═══ PAGE: ΕΞΩΦΥΛΛΟ (Cover / Front page) ═══
+At the bottom of the cover you will find:
+  (Α) ΑΡΙΘΜΟΣ ΚΥΚΛΟΦΟΡΙΑΣ : [PLATE NUMBER HERE]
+  ΑΡΙΘΜΟΣ ΕΓΓΡΑΦΟΥ : [document number — do NOT use this as the plate]
 
-Return ONLY valid JSON (null for missing): {"plate":null,"vin":null,"brand":null,"model":null,"year":null,"engine":null,"fuel":null,"color":null,"type":null,"ownerName":null,"mileage":null}`;
+⚠ CRITICAL: The PLATE NUMBER is ONLY the value next to "(Α) ΑΡΙΘΜΟΣ ΚΥΚΛΟΦΟΡΙΑΣ".
+  ΑΡΙΘΜΟΣ ΕΓΓΡΑΦΟΥ is a different document reference (starts with a letter like "Α 3043834") — NEVER use it as the plate.
+  Greek car plates: 3 Greek letters + 4 digits (e.g. ΑΒΓ 1234)
+  Greek motorcycle plates: 3 letters + 3 digits (e.g. ZKZ 267)
+
+═══ PAGE: ΣΤΟΙΧΕΙΑ ΟΧΗΜΑΤΟΣ (Vehicle Data) ═══
+Field codes printed on this inner page:
+  (4)   = Ημερομηνία πρώτης άδειας στην Ελλάδα = first registration date IN GREECE → extract year only (4-digit integer)
+  (D.1) = ΜΑΡΚΑ = manufacturer / brand (e.g. B.M.W., TOYOTA, VOLKSWAGEN)
+  (D.3) = ΕΜΠΟΡΙΚΗ ΟΝΟΜΑΣΙΑ = commercial model name (e.g. R 850 GS, GOLF, YARIS)
+  (E)   = ΑΡΙΘΜΟΣ ΑΝΑΓΝΩΡΙΣΗΣ ΟΧΗΜΑΤΟΣ = VIN / chassis number — EXACTLY 17 uppercase alphanumeric characters.
+          ⚠ Read each character individually: never confuse O with 0, I/l with 1, B with 8, S with 5, Z with 2.
+          VIN NEVER contains the letters I, O, or Q — if you see them, it is a misread.
+  (J)   = ΚΑΤΗΓΟΡΙΑ ΟΧΗΜΑΤΟΣ = vehicle category: M1 → car, L3E / L / ΔΙΚΥΚΛΟ → moto, N1 / N → truck, other → car
+  (P.1) = ΚΥΛΙΝΔΡΙΣΜΟΣ = engine displacement in cm³/cc — return as integer
+  (P.3) = ΤΥΠΟΣ ΚΑΥΣΙΜΟΥ = fuel type. Map: ΒΕΝΖΙΝΗ/SUPER/ΑΜΟΛΥΒΔΗ→gasoline, ΠΕΤΡΕΛΑΙΟ/DIESEL→diesel, ΥΓΡΑΕΡΙΟ/LPG→lpg, ΥΒΡΙΔΙΚΟ/HYBRID→hybrid, ΗΛΕΚΤΡΙΚΟ/ELECTRIC→electric
+  (R)   = ΧΡΩΜΑ = colour — return EXACTLY as printed in Greek (e.g. ΛΕΥΚΟ, ΜΑΥΡΟ, ΑΣΗΜΙ, ΓΚΡΙ, ΚΟΚΚΙΝΟ, ΜΠΛΕ)
+
+═══ PAGE: ΟΝΟΜΑΣΤΙΚΑ ΣΤΟΙΧΕΙΑ (Personal Data) ═══
+  (C.1.1) = ΕΠΩΝΥΜΟ = holder's SURNAME
+  (C.1.2) = ΜΙΚΡΟ ΟΝΟΜΑ = holder's FIRST NAME(S)
+  Copy the name EXACTLY as printed, in Greek capital letters. Combine as "C.1.2 C.1.1" (first name then surname).
+
+Return ONLY a valid JSON object — no markdown, no explanation, no extra text:
+{"plate":null,"vin":null,"brand":null,"model":null,"year":null,"engine":null,"fuel":null,"color":null,"type":null,"ownerName":null,"mileage":null}`;
+
+  const AI_ODO_SUFFIX = `\n\nAn additional odometer/instrument-cluster photo is also included as the LAST image. Read the current mileage (km) shown on the odometer and set "mileage" to that integer. If unreadable keep "mileage" as null.`;
+
+  // Same validation the server route (api/ai-scan.js) applies, mirrored here so a scan
+  // via a user-supplied key is just as reliable as the shared server key.
+  function normalizeAiScanResult(result) {
+    if (!result || typeof result !== 'object') return result;
+    if (result.plate) result.plate = String(result.plate).toUpperCase().replace(/[^A-ZΑ-ΩΆΈΉΊΌΎΏ0-9]/g, '').trim();
+    if (result.vin) {
+      const v = String(result.vin).toUpperCase().replace(/\s/g, '');
+      result.vin = v.length > 17 ? v.slice(0, 17) : v;
+    }
+    if (result.year) {
+      const y = parseInt(result.year, 10);
+      result.year = (y >= 1960 && y <= new Date().getFullYear() + 1) ? y : null;
+    }
+    if (result.engine) {
+      const cc = parseInt(result.engine, 10);
+      result.engine = (cc > 0 && cc < 20000) ? cc : null;
+    }
+    const FUELS = ['gasoline', 'diesel', 'lpg', 'hybrid', 'electric'];
+    if (result.fuel && !FUELS.includes(result.fuel)) result.fuel = null;
+    const TYPES = ['car', 'moto', 'boat', 'truck'];
+    if (result.type && !TYPES.includes(result.type)) result.type = 'car';
+    return result;
+  }
+
+  function extractJsonObject(txt) {
+    const start = txt.indexOf('{');
+    const end = txt.lastIndexOf('}');
+    if (start === -1 || end === -1 || end <= start) throw new Error('No JSON in response');
+    return JSON.parse(txt.slice(start, end + 1));
+  }
+
+  function dataUrlToBlock(dataUrl) {
+    const parts = dataUrl.split(',');
+    const mediaType = (parts[0].match(/:(.*?);/) || [])[1] || 'image/jpeg';
+    return { mediaType, b64: parts[1] || '' };
+  }
 
   async function aiExtractRegistration(imageDataUrls, odometerDataUrl) {
     const urls = Array.isArray(imageDataUrls) ? imageDataUrls : [imageDataUrls];
@@ -273,7 +341,7 @@ Return ONLY valid JSON (null for missing): {"plate":null,"vin":null,"brand":null
       // Network error in local dev → fall through to client keys
     }
 
-    // 2. Fallback: client-side API keys (local development)
+    // 2. Fallback: client-side API keys (local dev, or a user-supplied key)
     const anthropicKey = localStorage.getItem('anthropic_api_key');
     const openaiKey = localStorage.getItem('ai_api_key');
 
@@ -282,11 +350,18 @@ Return ONLY valid JSON (null for missing): {"plate":null,"vin":null,"brand":null
       return null;
     }
 
+    const prompt = AI_PROMPT + (odometerDataUrl ? AI_ODO_SUFFIX : '');
+
     if (anthropicKey) {
       try {
-        const parts = urls[0].split(',');
-        const mediaType = (parts[0].match(/:(.*?);/) || [])[1] || 'image/jpeg';
-        const b64 = parts[1] || '';
+        const imageBlocks = urls.map((u) => {
+          const { mediaType, b64 } = dataUrlToBlock(u);
+          return { type: 'image', source: { type: 'base64', media_type: mediaType, data: b64 } };
+        });
+        if (odometerDataUrl) {
+          const { mediaType, b64 } = dataUrlToBlock(odometerDataUrl);
+          imageBlocks.push({ type: 'image', source: { type: 'base64', media_type: mediaType, data: b64 } });
+        }
         const res = await fetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
           headers: {
@@ -298,18 +373,13 @@ Return ONLY valid JSON (null for missing): {"plate":null,"vin":null,"brand":null
           body: JSON.stringify({
             model: 'claude-haiku-4-5-20251001',
             max_tokens: 512,
-            messages: [{ role: 'user', content: [
-              { type: 'image', source: { type: 'base64', media_type: mediaType, data: b64 } },
-              { type: 'text', text: AI_PROMPT },
-            ]}],
+            messages: [{ role: 'user', content: [...imageBlocks, { type: 'text', text: prompt }] }],
           }),
         });
         const data = await res.json();
         if (data.error) throw new Error(data.error.message);
         const txt = data?.content?.[0]?.text || '';
-        const m = txt.match(/\{[\s\S]*\}/);
-        if (!m) throw new Error('No JSON in response');
-        return JSON.parse(m[0]);
+        return normalizeAiScanResult(extractJsonObject(txt));
       } catch (e) {
         console.error('Claude direct call failed:', e);
         toast(window.t ? window.t('error_generic') : 'Σφάλμα AI', 'error');
@@ -319,23 +389,21 @@ Return ONLY valid JSON (null for missing): {"plate":null,"vin":null,"brand":null
 
     // OpenAI
     try {
+      const imageContent = urls.map((u) => ({ type: 'image_url', image_url: { url: u } }));
+      if (odometerDataUrl) imageContent.push({ type: 'image_url', image_url: { url: odometerDataUrl } });
       const res = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${openaiKey}` },
         body: JSON.stringify({
           model: 'gpt-4o-mini',
-          messages: [{ role: 'user', content: [
-            { type: 'text', text: AI_PROMPT },
-            { type: 'image_url', image_url: { url: imageDataUrl } },
-          ]}],
+          messages: [{ role: 'user', content: [{ type: 'text', text: prompt }, ...imageContent] }],
           max_tokens: 500,
         }),
       });
       const data = await res.json();
+      if (data.error) throw new Error(data.error.message);
       const txt = data?.choices?.[0]?.message?.content || '';
-      const m = txt.match(/\{[\s\S]*\}/);
-      if (!m) throw new Error('No JSON in response');
-      return JSON.parse(m[0]);
+      return normalizeAiScanResult(extractJsonObject(txt));
     } catch (e) {
       console.error('OpenAI scan failed:', e);
       toast(window.t ? window.t('error_generic') : 'Σφάλμα AI', 'error');
@@ -628,7 +696,19 @@ Return ONLY valid JSON (null for missing): {"plate":null,"vin":null,"brand":null
       inputEl.value = out;
       inputEl.dispatchEvent(new Event('input', { bubbles: true }));
     };
-    r.onerror = () => onEnd?.();
+    r.onerror = (e) => {
+      // 'aborted' fires on a normal user-initiated stop (mouseup/touchend) — not a real error.
+      const MSGS = {
+        'not-allowed': 'voice_err_denied',
+        'service-not-allowed': 'voice_err_denied',
+        'audio-capture': 'voice_err_no_mic',
+        'no-speech': 'voice_err_no_speech',
+        'network': 'voice_err_network',
+      };
+      const key = MSGS[e.error];
+      if (key) toast(window.t ? window.t(key) : (key === 'voice_err_denied' ? 'Δεν επιτράπηκε η πρόσβαση στο μικρόφωνο' : key === 'voice_err_no_mic' ? 'Δεν βρέθηκε μικρόφωνο' : key === 'voice_err_no_speech' ? 'Δεν ακούστηκε ομιλία, δοκίμασε ξανά' : 'Σφάλμα δικτύου στην αναγνώριση ομιλίας'), 'error');
+      onEnd?.();
+    };
     r.onend = () => {
       if (finalAccum) {
         inputEl.dispatchEvent(new Event('change', { bubbles: true }));

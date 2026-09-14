@@ -39,8 +39,13 @@ module.exports = async function handler(req, res) {
 
     const data = await response.json();
     if (data.error) return res.status(500).json({ error: data.error.message });
-    const raw = (data?.content?.[0]?.text || '').trim();
-    const plate = raw.toUpperCase().replace(/[\s\-\.]/g, '');
+    const raw = (data?.content?.[0]?.text || '').trim().toUpperCase();
+    // Extract just the plate-shaped substring instead of trusting the whole response body —
+    // guards against the model wrapping the answer in a stray word or two despite instructions
+    // (e.g. "ΠΙΝΑΚΙΔΑ ΑΒΓ1234") from silently mangling the result.
+    const cleaned = raw.replace(/[^A-ZΑ-Ω0-9]/g, '');
+    const m = cleaned.match(/[A-ZΑ-Ω]{2,3}\d{3,4}/);
+    const plate = m ? m[0] : '';
     return res.status(200).json({ plate });
   } catch (e) {
     console.error('Plate OCR error:', e);

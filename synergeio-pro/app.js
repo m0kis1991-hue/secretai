@@ -62,9 +62,21 @@
   function kteoStatus(v) { return expiryStatus(v.kteoExpiry); }
   function emissionsStatus(v) { return expiryStatus(v.emissionsExpiry); }
 
+  // Strips Unicode combining diacritical marks (U+0300–U+036F) left behind by
+  // String.normalize('NFD') — used to drop Greek tonos accents. Built from char codes
+  // rather than a literal regex range to avoid any risk of the combining marks
+  // themselves getting mangled by an editor/encoding round-trip.
+  const COMBINING_MARKS_RE = new RegExp('[' + String.fromCharCode(0x0300) + '-' + String.fromCharCode(0x036f) + ']', 'g');
+  function stripCombiningMarks(s) {
+    return s.normalize('NFD').replace(COMBINING_MARKS_RE, '');
+  }
+
   function normPlate(p) {
-    // Remove spaces/dashes first, then uppercase
+    // Remove spaces/dashes first, then uppercase, then strip Greek tonos accents —
+    // voice transcripts of spelled-out letter names come back accented ("ΆΛΦΑ" from
+    // "άλφα"), but the NAME list below only has unaccented forms ("ΑΛΦΑ").
     let s = (p || '').toUpperCase().replace(/[\s\-_.]/g, '');
+    s = stripCombiningMarks(s);
 
     // Convert spelled-out Greek letter names → single letter (longest first to avoid partial matches)
     // Voice recognition says "ΜΙ ΝΙ ΡΟ" → writes "ΜΙΝΙΡΟ" → we decode back to "ΜΝΡ"
@@ -254,7 +266,13 @@
   }
 
   const VOICE_TRANSFORMS = {
-    plate: (s) => s.toUpperCase().replace(/\s+/g, '').replace(/[^A-ZΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩ0-9]/gi, ''),
+    // Plates are dictated letter-by-letter/digit-by-digit ("άλφα βήτα γάμα ένα δύο τρία
+    // τέσσερα"), so route through the same decoder used for plate search/matching
+    // (spelled-out Greek letter names + digit words → ΑΒΓ1234), not just a raw uppercase.
+    plate: (s) => normPlate(applyGreekDigits(s)),
+
+    // VIN: 17 uppercase alphanumeric chars, no separators.
+    vin: (s) => s.toUpperCase().replace(/\s+/g, '').replace(/[^A-Z0-9]/g, ''),
 
     phone: (s) => {
       const hasPlus = /[+]|συν\b|plus\b/i.test(s);
@@ -1642,11 +1660,11 @@
           </div>
 
           <div class="grid grid-cols-2 gap-3">
-            ${formField('brand', t('vehicle_brand'), v.brand, { required: true })}
-            ${formField('model', t('vehicle_model'), v.model, { required: true })}
+            ${formField('brand', t('vehicle_brand'), v.brand, { required: true, voice: true })}
+            ${formField('model', t('vehicle_model'), v.model, { required: true, voice: true })}
           </div>
           <div class="grid grid-cols-2 gap-3">
-            ${formField('year', t('vehicle_year'), v.year, { type: 'number' })}
+            ${formField('year', t('vehicle_year'), v.year, { type: 'number', voice: true })}
             <div>
               <label class="block text-sm font-medium mb-1">${t('vehicle_plate')}</label>
               <div class="flex gap-2">
@@ -1656,10 +1674,10 @@
               </div>
             </div>
           </div>
-          ${formField('vin', t('vehicle_vin'), v.vin)}
+          ${formField('vin', t('vehicle_vin'), v.vin, { voice: true, transform: 'vin' })}
           <div class="grid grid-cols-2 gap-3">
-            ${formField('engine', t('vehicle_engine'), v.engine, { placeholder: 'cc' })}
-            ${formField('engineCode', t('vehicle_engine_code'), v.engineCode)}
+            ${formField('engine', t('vehicle_engine'), v.engine, { placeholder: 'cc', voice: true, transform: 'number' })}
+            ${formField('engineCode', t('vehicle_engine_code'), v.engineCode, { voice: true, transform: 'name' })}
           </div>
           <div class="grid grid-cols-2 gap-3">
             <div>
@@ -1671,9 +1689,9 @@
                 ).join('')}
               </select>
             </div>
-            ${formField('color', t('vehicle_color'), v.color)}
+            ${formField('color', t('vehicle_color'), v.color, { voice: true, transform: 'name' })}
           </div>
-          ${formField('mileage', t('vehicle_mileage'), v.mileage, { type: 'number' })}
+          ${formField('mileage', t('vehicle_mileage'), v.mileage, { type: 'number', voice: true })}
 
           <div>
             <label class="block text-sm font-medium mb-1">${t('photo')} ${t('vehicle')} / ${t('qa_scan_doc')}</label>
@@ -1682,7 +1700,7 @@
               <div class="flex-1 flex flex-col gap-2">
                 <label class="bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 px-3 py-2 rounded-lg text-sm cursor-pointer flex items-center gap-1 justify-center">
                   ${icon('camera','w-4 h-4')} ${t('take_photo')}
-                  <input type="file" accept="image/*" capture="environment" class="hidden" id="reg-file" />
+                  <input type="file" accept="image/*" class="hidden" id="reg-file" />
                 </label>
                 <input type="hidden" name="regPhoto" value="${v.regPhoto || ''}" id="reg-photo-hidden" />
               </div>
@@ -1977,7 +1995,7 @@
 
           <div class="grid grid-cols-2 gap-3">
             ${formField('date', t('service_date'), s.date ? s.date.slice(0,10) : U.localDateStr(), { type: 'date', required: true })}
-            ${formField('mileage', t('service_mileage'), s.mileage, { type: 'number' })}
+            ${formField('mileage', t('service_mileage'), s.mileage, { type: 'number', voice: true })}
           </div>
 
           <div class="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-900/40 rounded-xl p-4">
@@ -2011,7 +2029,7 @@
           <div class="grid grid-cols-2 gap-3">
             ${formField('nextServiceDate', t('service_next_date'), s.nextServiceDate ? s.nextServiceDate.slice(0,10) : '', { type: 'date' })}
             <div>
-              ${formField('nextServiceMileage', t('service_next_in_km'), s.nextServiceMileage, { type: 'number' })}
+              ${formField('nextServiceMileage', t('service_next_in_km'), s.nextServiceMileage, { type: 'number', voice: true })}
               <div class="flex flex-wrap gap-1 mt-1.5">
                 ${[3000,5000,10000,15000,20000].map((d) => `<button type="button" data-km-offset="${d}" class="next-km-btn text-xs px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 hover:bg-blue-100 dark:hover:bg-blue-900/30 text-slate-600 dark:text-slate-300 hover:text-blue-800 dark:hover:text-blue-400 border border-slate-200 dark:border-slate-600 transition-colors">+${d >= 1000 ? (d/1000)+'k' : d} km</button>`).join('')}
               </div>
@@ -2512,7 +2530,7 @@
           <div class="text-xs font-semibold text-slate-600 dark:text-slate-300 text-center leading-tight">${label}</div>
           <label id="lbl${idx}" class="${btnColor} ${btnHover} text-white px-2.5 py-1.5 rounded-lg cursor-pointer inline-flex items-center gap-1 text-xs font-medium">
             ${icon('camera','w-3.5 h-3.5')} Φωτό
-            <input type="file" id="file${idx}" accept="image/*" capture="environment" class="hidden" />
+            <input type="file" id="file${idx}" accept="image/*" class="hidden" />
           </label>
         </div>`;
     }
@@ -2552,7 +2570,7 @@
               <div class="text-xs text-slate-500 dark:text-slate-400 text-center">${t('ai_scan_odometer_tip')}</div>
               <label id="lbl3" class="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg cursor-pointer inline-flex items-center gap-1.5 text-xs font-medium">
                 ${icon('camera','w-3.5 h-3.5')} ${t('take_photo')}
-                <input type="file" id="file3" accept="image/*" capture="environment" class="hidden" />
+                <input type="file" id="file3" accept="image/*" class="hidden" />
               </label>
             </div>
           </div>
@@ -2584,7 +2602,7 @@
       $(`#img${idx}`).src = compressed;
       $(`#prev${idx}`).classList.remove('hidden');
       $(`#lbl${idx}`).className = retakeCls;
-      $(`#lbl${idx}`).innerHTML = `${icon('refresh-cw','w-3.5 h-3.5')} Ξανά<input type="file" id="file${idx}" accept="image/*" capture="environment" class="hidden" />`;
+      $(`#lbl${idx}`).innerHTML = `${icon('refresh-cw','w-3.5 h-3.5')} Ξανά<input type="file" id="file${idx}" accept="image/*" class="hidden" />`;
       $(`#file${idx}`).addEventListener('change', (ev) => handleFile(idx, ev));
       refreshIcons();
       updateAnalyzeBtn();
@@ -6182,10 +6200,10 @@
   function formField(name, label, value, opts) {
     opts = opts || {};
     const fieldId = opts.id || `ff-${name}`;
-    const isText = !opts.type || opts.type === 'text' || opts.type === 'tel' || opts.type === 'email';
+    const isVoiceable = !opts.type || opts.type === 'text' || opts.type === 'tel' || opts.type === 'email' || opts.type === 'number';
     // Auto-detect transform by field type if not explicitly set
-    const vtr = opts.transform || (opts.type === 'tel' ? 'phone' : opts.type === 'email' ? 'email' : '');
-    const mic = opts.voice && isText ? micBtn(fieldId, { transform: vtr }) : '';
+    const vtr = opts.transform || (opts.type === 'tel' ? 'phone' : opts.type === 'email' ? 'email' : opts.type === 'number' ? 'number' : '');
+    const mic = opts.voice && isVoiceable ? micBtn(fieldId, { transform: vtr }) : '';
     return `
       <div>
         <label class="block text-sm font-medium mb-1">${U.escape(label)}${opts.required?' <span class="text-red-500">*</span>':''}</label>

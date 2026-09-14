@@ -79,6 +79,10 @@ window.I18N = {
     plate_active_orders: 'ενεργές εντολές',
     customer_search_placeholder: 'Αναζήτηση πελάτη...',
     voice_tap_hint: 'Κράτα πατημένο και μίλα',
+    voice_err_denied: 'Δεν επιτράπηκε η πρόσβαση στο μικρόφωνο. Έλεγξε τις ρυθμίσεις του browser.',
+    voice_err_no_mic: 'Δεν βρέθηκε μικρόφωνο στη συσκευή.',
+    voice_err_no_speech: 'Δεν ακούστηκε ομιλία. Δοκίμασε ξανά, πιο κοντά στο μικρόφωνο.',
+    voice_err_network: 'Σφάλμα δικτύου κατά την αναγνώριση ομιλίας.',
 
     // Customers
     customers: 'Πελάτες',
@@ -411,6 +415,10 @@ window.I18N = {
     plate_active_orders: 'active orders',
     customer_search_placeholder: 'Search customer...',
     voice_tap_hint: 'Hold and speak',
+    voice_err_denied: 'Microphone access was denied. Check your browser settings.',
+    voice_err_no_mic: 'No microphone found on this device.',
+    voice_err_no_speech: 'No speech detected. Try again, closer to the microphone.',
+    voice_err_network: 'Network error during speech recognition.',
 
     customers: 'Customers',
     customer: 'Customer',
