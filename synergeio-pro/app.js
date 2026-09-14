@@ -3161,6 +3161,7 @@
           ` : ''}
           ${jo.status === 'completed' ? `
             <button id="export-pdf" class="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-medium py-3 rounded-xl flex items-center justify-center gap-2">${icon('file-text','w-5 h-5')} ${t('jo_export_pdf')}</button>
+            <button id="reopen-jo" class="w-full border border-amber-300 dark:border-amber-700 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 font-medium py-3 rounded-xl flex items-center justify-center gap-2">${icon('rotate-ccw','w-5 h-5')} ${t('jo_reopen')}</button>
           ` : ''}
           ${c?.phone ? `
             <a href="tel:${U.escape(c.phone)}" class="block w-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 font-medium py-2.5 rounded-xl text-center flex items-center justify-center gap-2 text-sm">${icon('phone-call','w-4 h-4')} ${t('jo_call_customer')}</a>
@@ -3189,6 +3190,20 @@
 
     const pdfBtn = $('#export-pdf');
     if (pdfBtn) pdfBtn.addEventListener('click', () => jobOrderPdf(jo));
+
+    const reopenBtn = $('#reopen-jo');
+    if (reopenBtn) {
+      reopenBtn.addEventListener('click', async () => {
+        if (!confirm(t('jo_reopen_confirm'))) return;
+        jo.status = 'in_progress';
+        jo.completedAt = null;
+        if (!jo.startedAt) jo.startedAt = new Date().toISOString();
+        await DB.add('job_orders', jo);
+        state.jobOrders = await DB.getAll('job_orders');
+        U.toast(t('jo_reopened_msg'));
+        go('/job-orders/' + id + '/work');
+      });
+    }
   }
 
   async function renderJobOrderWork(id) {
