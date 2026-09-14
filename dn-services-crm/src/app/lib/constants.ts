@@ -34,6 +34,10 @@ export const STATUS = {
   // doesn't list these), always to trophy_contact_sessions.status (plain unconstrained text).
   LEFT:            'left',
   RETURN:          'return',
+  // Contact already a customer of the business — trophy-only, same rules as LEFT/RETURN above.
+  // Once set, the contact must be permanently excluded from the trophy pool/search (see
+  // trophyCustomerContactIds in contacts/page.tsx) so it never resurfaces to be called again.
+  CUSTOMER:        'customer',
 } as const
 
 export type LeadStatus = typeof STATUS[keyof typeof STATUS]

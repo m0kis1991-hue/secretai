@@ -1085,6 +1085,7 @@ export function ContactDetailsClient({ id, scope }: { id: string; scope?: string
                               {(isTrophyMode || scope === 'trophy') && <SelectItem value="left">{lang === 'el' ? 'Έφυγαν' : 'Left'}</SelectItem>}
                               {(isTrophyMode || scope === 'trophy') && <SelectItem value="return">{lang === 'el' ? 'Επιστροφή' : 'Return'}</SelectItem>}
                               <SelectItem value="bought">{lang === 'el' ? 'Αγόρασε' : 'Bought'}</SelectItem>
+                              {(isTrophyMode || scope === 'trophy') && <SelectItem value="customer">{lang === 'el' ? 'Πελάτης' : 'Customer'}</SelectItem>}
                             </SelectContent>
                           </>
                         </Select>

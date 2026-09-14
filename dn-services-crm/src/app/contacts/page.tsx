@@ -243,7 +243,7 @@ const PAGE_SIZE = 10
 
 const todayISO = () => new Date().toISOString().slice(0, 10)
 
-type FilterKey = 'all' | 'today' | 'high' | 'new' | 'canva' | 'probable' | 'likely_sale' | 'likely_antisale' | 'another_time' | 'email' | 'no_answer' | 'not_buying' | 'bought' | 'few_reviews' | 'left' | 'return'
+type FilterKey = 'all' | 'today' | 'high' | 'new' | 'canva' | 'probable' | 'likely_sale' | 'likely_antisale' | 'another_time' | 'email' | 'no_answer' | 'not_buying' | 'bought' | 'few_reviews' | 'left' | 'return' | 'customer'
 
 const STATUS_COLS: { key: LeadStatus; labelEl: string; labelEn: string; color: string }[] = [
   { key: STATUS.NEW,             labelEl: 'Νέο',           labelEn: 'New',       color: 'border-t-blue-400' },
@@ -266,6 +266,7 @@ const TROPHY_STATUS_COLS: { key: LeadStatus; labelEl: string; labelEn: string; c
   { key: STATUS.LEFT,        labelEl: 'Έφυγαν',               labelEn: 'Left',        color: 'border-t-slate-500' },
   { key: STATUS.RETURN,      labelEl: 'Επιστροφή',            labelEn: 'Return',      color: 'border-t-cyan-500' },
   { key: STATUS.BOUGHT,      labelEl: 'Αγόρασε',              labelEn: 'Bought',      color: 'border-t-green-500' },
+  { key: STATUS.CUSTOMER,    labelEl: 'Πελάτης',              labelEn: 'Customer',    color: 'border-t-emerald-700' },
 ]
 
 const emptyForm = (): Partial<Contact> => ({
@@ -295,7 +296,7 @@ export default function ContactsPage() {
   const pageJumpRef = useRef<HTMLInputElement>(null)
   const [activeFilter, setActiveFilter] = useState<FilterKey>(() => {
     try {
-      const VALID: FilterKey[] = ['all','today','high','new','canva','probable','likely_sale','likely_antisale','another_time','email','no_answer','not_buying','bought','few_reviews','left','return']
+      const VALID: FilterKey[] = ['all','today','high','new','canva','probable','likely_sale','likely_antisale','another_time','email','no_answer','not_buying','bought','few_reviews','left','return','customer']
       const stored = sessionStorage.getItem('contacts-filter') as FilterKey
       return VALID.includes(stored) ? stored : 'all'
     } catch { return 'all' }
@@ -370,6 +371,10 @@ export default function ContactsPage() {
     // Bypass the rating window entirely for this filter — fetch exactly which contacts are
     // probable right now (latest session status per contact, not "ever was probable").
     let trophyProbableIds: string[] | null = null
+    // Contacts any trophy telephonist has already marked 'customer' (latest session status per
+    // contact) — permanently excluded from the shared pool/search below so an already-converted
+    // contact never resurfaces to be called again by someone else.
+    let trophyCustomerContactIds: Set<string> = new Set()
 
     const buildQuery = (withRating: boolean) => {
       const cols = withRating ? `${CONTACT_BASE_COLUMNS},rating,review_count` : CONTACT_BASE_COLUMNS
@@ -553,10 +558,11 @@ export default function ContactsPage() {
         }
       }
 
-      // Trophy telephonist's own 'probable' filter: resolve exactly which contacts are probable
-      // RIGHT NOW — the latest session per contact, not "ever had a probable session" (a contact
-      // that moved on to another status shouldn't still show up here).
-      if (p.topLeadsAccess && p.activeFilter === 'probable' && !isKanban) {
+      // Trophy telephonist's own view: resolve the latest session status per contact once, RIGHT
+      // NOW (not "ever had that session status" — a contact that moved on shouldn't still count).
+      // Used for (1) the 'probable' filter, which needs to bypass the rating-sorted pool window,
+      // and (2) permanently excluding already-'customer' contacts from the pool/search below.
+      if (p.topLeadsAccess && !isKanban) {
         const { data: sessions } = await supabase
           .from('trophy_contact_sessions')
           .select('contact_id, status, updated_at')
@@ -567,7 +573,10 @@ export default function ContactsPage() {
         for (const s of sessions ?? []) {
           if (!latest.has(s.contact_id)) latest.set(s.contact_id, s.status)
         }
-        trophyProbableIds = [...latest.entries()].filter(([, st]) => st === 'probable').map(([id]) => id)
+        if (p.activeFilter === 'probable') {
+          trophyProbableIds = [...latest.entries()].filter(([, st]) => st === 'probable').map(([id]) => id)
+        }
+        trophyCustomerContactIds = new Set([...latest.entries()].filter(([, st]) => st === 'customer').map(([id]) => id))
       }
 
       if (p.topLeadsAccess) {
@@ -608,8 +617,14 @@ export default function ContactsPage() {
         const { data, error } = contactsRes as any
         const { data: ownData } = ownRes as any
         if (!error && data) {
-          // Own contacts (admin-assigned) always bypass another telephonist's session lock
-          const poolContacts = (data as any[]).map(rowToContact).filter(c => !lockedByOtherTrophy.has(c.id) || c.ownerId === p.currentUserId)
+          // Own contacts (admin-assigned) always bypass another telephonist's session lock.
+          // Contacts already marked 'customer' by SOMEONE ELSE are dropped from the shared pool
+          // entirely — they're already a customer of the business and must never resurface as a
+          // lead to call again. If the current telephonist owns that session themselves, keep it
+          // so it still shows up under their own 'Πελάτης' filter/kanban column.
+          const poolContacts = (data as any[]).map(rowToContact)
+            .filter(c => !lockedByOtherTrophy.has(c.id) || c.ownerId === p.currentUserId)
+            .filter(c => !trophyCustomerContactIds.has(c.id) || myTrophyContactIds.current.has(c.id))
           // Merge in own contacts that are outside the top-2000 pool (ΔΗΜΗΤΡΗΣ scenario)
           const ownContacts = ((ownData ?? []) as any[]).map(rowToContact)
           const seenIds = new Set(poolContacts.map(c => c.id))
@@ -1096,6 +1111,7 @@ export default function ContactsPage() {
       case 'few_reviews':     return st === 'few_reviews'
       case 'left':            return st === 'left'
       case 'return':          return st === 'return'
+      case 'customer':        return st === 'customer'
       default: return true
     }
   }
@@ -1328,6 +1344,7 @@ export default function ContactsPage() {
       case 'not_buying':      return <Badge variant="destructive" className="text-[10px]">{lang === 'el' ? 'Όχι' : 'No'}</Badge>
       case 'left':            return <Badge className="bg-slate-500 text-white text-[10px]">{lang === 'el' ? 'Έφυγαν' : 'Left'}</Badge>
       case 'return':          return <Badge className="bg-cyan-500 text-white text-[10px]">{lang === 'el' ? 'Επιστροφή' : 'Return'}</Badge>
+      case 'customer':        return <Badge className="bg-emerald-700 text-white text-[10px]">{lang === 'el' ? 'Πελάτης' : 'Customer'}</Badge>
       default:              return <Badge variant="secondary" className="text-[10px]">{lang === 'el' ? 'Νέο' : 'New'}</Badge>
     }
   }
@@ -1567,6 +1584,7 @@ export default function ContactsPage() {
     { key: 'left',          labelEl: 'Έφυγαν',               labelEn: 'Left' },
     { key: 'return',        labelEl: 'Επιστροφή',            labelEn: 'Return' },
     { key: 'bought',        labelEl: 'Αγόρασαν',             labelEn: 'Bought' },
+    { key: 'customer',      labelEl: 'Πελάτης',              labelEn: 'Customer' },
   ]
   const FILTERS: { key: FilterKey; labelEl: string; labelEn: string; badge?: number }[] =
     (topLeadsAccess || (isAdmin && ownerScope === 'trophy')) ? TROPHY_FILTERS : [

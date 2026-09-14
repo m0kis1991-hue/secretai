@@ -88,7 +88,7 @@ type TelephonistStat = {
   id: string
   name: string
   ownedContacts: number
-  byStatus: { new: number; canva: number; probable: number; bought: number; not_buying: number; no_answer: number; likely_sale: number; likely_antisale: number; another_time: number; email: number; left: number; return: number }
+  byStatus: { new: number; canva: number; probable: number; bought: number; not_buying: number; no_answer: number; likely_sale: number; likely_antisale: number; another_time: number; email: number; left: number; return: number; customer: number }
   callsToday: number
   callsWeek: number
   callsDetail: Array<{ contact_id: string; contact_name: string; called_at: string }>
@@ -310,7 +310,7 @@ export default function DashboardPage() {
           another_time: cnt('another_time'),
           email: cnt('email'),
           bought: cnt('bought'), not_buying: cnt('not_buying'), no_answer: cnt('no_answer'),
-          left: cnt('left'), return: cnt('return'),
+          left: cnt('left'), return: cnt('return'), customer: cnt('customer'),
         }
         const ownedContacts = Array.from(statusMap.values()).reduce((s, r) => s + Number(r.cnt), 0)
         const followUpsToday = Array.from(statusMap.values()).reduce((s, r) => s + Number(r.next_action_today), 0)
@@ -567,6 +567,7 @@ export default function DashboardPage() {
     { status: 'no_answer',       nameEl: 'Δεν Απάντησε',       nameEn: 'No Answer',     color: '#f97316' },
     { status: 'left',            nameEl: 'Έφυγαν',             nameEn: 'Left',          color: '#64748b' },
     { status: 'return',          nameEl: 'Επιστροφή',          nameEn: 'Return',        color: '#06b6d4' },
+    { status: 'customer',        nameEl: 'Πελάτης',            nameEn: 'Customer',      color: '#047857' },
   ], [])
 
   const pieData = useMemo(() =>
@@ -1291,6 +1292,7 @@ export default function DashboardPage() {
                               { key: 'not_buying',   count: stat.byStatus.not_buying,   dot: 'bg-red-400',    label: lang === 'el' ? 'Δεν αγοράζει' : 'Not buying',       text: `${stat.byStatus.not_buying}` },
                               { key: 'left',         count: stat.byStatus.left,         dot: 'bg-slate-500',  label: lang === 'el' ? 'Έφυγαν' : 'Left',                   text: `${stat.byStatus.left}` },
                               { key: 'return',       count: stat.byStatus.return,       dot: 'bg-cyan-500',   label: lang === 'el' ? 'Επιστροφή' : 'Return',              text: `${stat.byStatus.return}` },
+                              { key: 'customer',     count: stat.byStatus.customer,     dot: 'bg-emerald-700',label: lang === 'el' ? 'Πελάτης' : 'Customer',              text: `${stat.byStatus.customer}` },
                             ] : [
                               { key: 'new',             count: stat.byStatus.new,             dot: 'bg-blue-400',  label: lang === 'el' ? 'Νέοι' : 'New',                  text: `${stat.byStatus.new}` },
                               { key: 'canva',           count: stat.byStatus.canva,           dot: 'bg-purple-500',label: 'Canva',                                         text: `${stat.byStatus.canva}` },
@@ -1532,6 +1534,7 @@ export default function DashboardPage() {
                   no_answer:       { label: lang === 'el' ? 'Δεν Απάντησε' : 'No Answer', colorClass: 'text-orange-600', dotColor: 'bg-orange-400' },
                   bought:          { label: lang === 'el' ? 'Αγόρασε' : 'Bought',         colorClass: 'text-green-700',  dotColor: 'bg-green-500' },
                   not_buying:      { label: lang === 'el' ? 'Δεν αγοράζει' : 'Not Buying', colorClass: 'text-red-600',  dotColor: 'bg-red-400' },
+                  customer:        { label: lang === 'el' ? 'Πελάτης' : 'Customer',        colorClass: 'text-emerald-700', dotColor: 'bg-emerald-700' },
                 }
                 const meta = STATUS_META[telStatusDetailKey] ?? { label: telStatusDetailKey, colorClass: 'text-foreground', dotColor: 'bg-muted' }
 

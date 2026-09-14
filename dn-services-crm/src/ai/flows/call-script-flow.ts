@@ -5,7 +5,7 @@ const CallScriptInputSchema = z.object({
   name: z.string(),
   jobTitle: z.string().optional(),
   industry: z.string().optional(),
-  status: z.enum(['new', 'canva', 'probable', 'likely_sale', 'likely_antisale', 'another_time', 'email', 'not_buying', 'no_answer', 'bought', 'few_reviews', 'left', 'return']),
+  status: z.enum(['new', 'canva', 'probable', 'likely_sale', 'likely_antisale', 'another_time', 'email', 'not_buying', 'no_answer', 'bought', 'few_reviews', 'left', 'return', 'customer']),
   investmentAmount: z.number(),
   observations: z.string().optional(),
   language: z.enum(['el', 'en']).default('el'),
