@@ -1,11 +1,12 @@
 // Service Worker για offline λειτουργία
-const CACHE_NAME = 'synergeio-pro-v7';
+const CACHE_NAME = 'synergeio-pro-v28';
 const ASSETS = [
   './',
   './index.html',
   './manifest.webmanifest',
-  './icon-192.svg',
-  './icon-512.svg',
+  './icon-192.png',
+  './icon-512.png',
+  './maintenance-data.js',
   'https://cdn.tailwindcss.com',
   'https://unpkg.com/lucide@latest/dist/umd/lucide.js',
   'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js',

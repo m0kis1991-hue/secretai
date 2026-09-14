@@ -50,6 +50,21 @@ window.U = (function () {
     }
   }
 
+  function localDateStr(d) {
+    // YYYY-MM-DD in the browser's local timezone (unlike `.toISOString().slice(0,10)`,
+    // which reads the UTC date and is wrong near midnight in any non-UTC timezone).
+    const date = d ? new Date(d) : new Date();
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  function fmtNum(v) {
+    const lang = localStorage.getItem('lang') || 'el';
+    return Math.round(Number(v) || 0).toLocaleString(lang === 'el' ? 'el-GR' : 'en-GB');
+  }
+
   function daysBetween(a, b) {
     const ms = new Date(b) - new Date(a);
     return Math.round(ms / (1000 * 60 * 60 * 24));
@@ -568,6 +583,8 @@ Return ONLY valid JSON (null for missing): {"plate":null,"vin":null,"brand":null
     fmtDate,
     fmtDatetime,
     fmtMoney,
+    fmtNum,
+    localDateStr,
     daysBetween,
     addMonths,
     toast,
@@ -600,21 +617,14 @@ Return ONLY valid JSON (null for missing): {"plate":null,"vin":null,"brand":null
     const r = new SR();
     r.lang = lang;
     r.continuous = true;
-    r.interimResults = true;
+    r.interimResults = false;
     r.maxAlternatives = 1;
     let finalAccum = '';
     r.onresult = (e) => {
-      let full = finalAccum;
       for (let i = e.resultIndex; i < e.results.length; i++) {
-        if (e.results[i].isFinal) {
-          const t = e.results[i][0].transcript;
-          finalAccum += t;
-          full = finalAccum;
-        } else {
-          full = finalAccum + e.results[i][0].transcript;
-        }
+        if (e.results[i].isFinal) finalAccum += e.results[i][0].transcript;
       }
-      const out = typeof transform === 'function' ? transform(full) : full;
+      const out = typeof transform === 'function' ? transform(finalAccum) : finalAccum;
       inputEl.value = out;
       inputEl.dispatchEvent(new Event('input', { bubbles: true }));
     };

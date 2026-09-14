@@ -3,8 +3,8 @@
 // =========================================================
 window.DB = (function () {
   const DB_NAME = 'synergeio_pro';
-  const DB_VERSION = 2;
-  const STORES = ['customers', 'vehicles', 'services', 'settings', 'job_orders'];
+  const DB_VERSION = 3;
+  const STORES = ['customers', 'vehicles', 'services', 'settings', 'job_orders', 'appointments'];
 
   let dbPromise = null;
 
@@ -116,7 +116,15 @@ window.DB = (function () {
     for (const s of STORES) {
       if (Array.isArray(data[s])) {
         await clear(s);
-        for (const item of data[s]) await add(s, item);
+        for (const item of data[s]) {
+          // Use raw put to preserve all original fields (createdAt, updatedAt, etc.)
+          const store = await tx(s, 'readwrite');
+          await new Promise((resolve, reject) => {
+            const r = store.put({ ...item });
+            r.onsuccess = () => resolve();
+            r.onerror = () => reject(r.error);
+          });
+        }
       }
     }
   }

@@ -11,18 +11,23 @@
     services: [],
     settings: {},
     jobOrders: [],
+    appointments: [],
   };
 
   async function loadAll() {
-    state.customers = await DB.getAll('customers');
-    state.vehicles = await DB.getAll('vehicles');
-    state.services = await DB.getAll('services');
-    state.jobOrders = await DB.getAll('job_orders');
-    state.settings = await DB.getAllSettings();
+    [state.customers, state.vehicles, state.services, state.jobOrders, state.appointments, state.settings] = await Promise.all([
+      DB.getAll('customers'),
+      DB.getAll('vehicles'),
+      DB.getAll('services'),
+      DB.getAll('job_orders'),
+      DB.getAll('appointments'),
+      DB.getAllSettings(),
+    ]);
     if (!state.settings.currency) state.settings.currency = 'EUR';
     if (!state.settings.intervalKm) state.settings.intervalKm = 10000;
     if (!state.settings.intervalMonths) state.settings.intervalMonths = 12;
     if (!state.settings.laborRate) state.settings.laborRate = 35;
+    // workshopId is set either via activation screen (registered) or skip button (local/demo)
   }
 
   // ---------- Helpers ----------
@@ -33,6 +38,77 @@
   function vehicleById(id) { return state.vehicles.find((v) => v.id === id); }
   function serviceById(id) { return state.services.find((s) => s.id === id); }
   function jobOrderById(id) { return state.jobOrders.find((j) => j.id === id); }
+  function appointmentById(id) { return (state.appointments || []).find((a) => a.id === id); }
+
+  // ---- KTEO / Emissions helpers ----
+  function endOfMonth(yyyymm) {
+    if (!yyyymm) return null;
+    const [y, m] = yyyymm.split('-').map(Number);
+    return new Date(y, m, 0); // last day of the given month
+  }
+  function fmtMonth(yyyymm) {
+    if (!yyyymm) return '—';
+    const MONTHS = ['Ιαν','Φεβ','Μαρ','Απρ','Μαΐ','Ιουν','Ιουλ','Αυγ','Σεπ','Οκτ','Νοε','Δεκ'];
+    const [y, m] = yyyymm.split('-').map(Number);
+    return `${MONTHS[m - 1]} ${y}`;
+  }
+  function expiryStatus(yyyymm) {
+    if (!yyyymm) return null;
+    const expiry = endOfMonth(yyyymm);
+    const daysLeft = Math.floor((expiry - new Date()) / 86400000);
+    return { expiry, daysLeft, month: yyyymm,
+      status: daysLeft < 0 ? 'expired' : daysLeft <= 14 ? 'critical' : daysLeft <= 60 ? 'upcoming' : 'ok' };
+  }
+  function kteoStatus(v) { return expiryStatus(v.kteoExpiry); }
+  function emissionsStatus(v) { return expiryStatus(v.emissionsExpiry); }
+
+  function normPlate(p) {
+    // Remove spaces/dashes first, then uppercase
+    let s = (p || '').toUpperCase().replace(/[\s\-_.]/g, '');
+
+    // Convert spelled-out Greek letter names → single letter (longest first to avoid partial matches)
+    // Voice recognition says "ΜΙ ΝΙ ΡΟ" → writes "ΜΙΝΙΡΟ" → we decode back to "ΜΝΡ"
+    const NAMES = [
+      ['ΟΜΙΚΡΟΝ','Ο'],
+      ['ΕΨΙΛΟΝ','Ε'],['ΛΑΜΒΔΑ','Λ'],['ΥΨΙΛΟΝ','Υ'],['ΟΜΙΚΡΟ','Ο'],
+      ['ΓΑΜΜΑ','Γ'],['ΔΕΛΤΑ','Δ'],['ΚΑΠΠΑ','Κ'],['ΛΑΜΔΑ','Λ'],['ΣΙΓΜΑ','Σ'],['ΩΜΕΓΑ','Ω'],['ΕΨΙΛΟ','Ε'],['ΥΨΙΛΟ','Υ'],
+      ['ΑΛΦΑ','Α'],['ΒΗΤΑ','Β'],['ΒΙΤΑ','Β'],['ΓΑΜΑ','Γ'],['ΖΗΤΑ','Ζ'],['ΖΙΤΑ','Ζ'],['ΘΗΤΑ','Θ'],['ΘΙΤΑ','Θ'],['ΙΩΤΑ','Ι'],
+      ['ΗΤΑ','Η'],['ΤΑΥ','Τ'],['ΤΑΦ','Τ'],
+      ['ΜΙ','Μ'],['ΜΥ','Μ'],['ΝΙ','Ν'],['ΝΥ','Ν'],['ΡΟ','Ρ'],['ΡΩ','Ρ'],
+      ['ΠΙ','Π'],['ΦΙ','Φ'],['ΧΙ','Χ'],['ΨΙ','Ψ'],['ΞΙ','Ξ'],
+    ];
+    for (const [name, letter] of NAMES) {
+      s = s.split(name).join(letter);
+    }
+
+    // Keep only letters and digits
+    s = s.replace(/[^A-ZΑ-ΩΆΈΉΊΌΎΏ0-9]/g, '');
+
+    // Greek plate format: max 3 letters + max 4 digits
+    const letters = s.replace(/[0-9]/g, '').slice(0, 3);
+    const digits  = s.replace(/[^0-9]/g, '').slice(0, 4);
+    return letters + digits;
+  }
+  function kteoStatusBadge(st, label, icon_name) {
+    if (!st) return '';
+    const col = {
+      ok:       'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 text-green-700 dark:text-green-300',
+      upcoming: 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300',
+      critical: 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300',
+      expired:  'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300',
+    }[st.status];
+    const dayTxt = st.daysLeft < 0 ? `Ληγμένο (${-st.daysLeft}μ.)` : st.daysLeft === 0 ? 'Λήγει σήμερα!' : st.daysLeft <= 14 ? `Λήγει σε ${st.daysLeft}μ.` : st.daysLeft <= 60 ? `${st.daysLeft} ημέρες` : 'Σε ισχύ';
+    return `<div class="flex items-center justify-between border rounded-xl px-3 py-2.5 ${col}">
+      <div class="flex items-center gap-2">
+        ${icon(icon_name,'w-4 h-4 flex-shrink-0')}
+        <span class="text-xs font-semibold">${label}</span>
+      </div>
+      <div class="text-right">
+        <div class="text-sm font-bold">${fmtMonth(st.month)}</div>
+        <div class="text-xs opacity-80">${dayTxt}</div>
+      </div>
+    </div>`;
+  }
 
   const TASK_PRESETS_BY_TYPE = {
     car: [
@@ -115,6 +191,18 @@
       .filter(Boolean).join(' ');
   }
 
+  function svcRevenue(sv) {
+    // Legacy records (created before parts/labor tracking existed) have neither field set —
+    // fall back to the old flat `cost`. Records that do track parts/labor report their real
+    // total even when it's exactly 0 (e.g. free warranty work), instead of masking it with `cost`.
+    const hasPartsOrLabor = (Array.isArray(sv.parts) && sv.parts.length > 0) || sv.laborHours != null;
+    if (!hasPartsOrLabor) return Number(sv.cost) || 0;
+    const parts = (sv.parts || []).reduce((sum, p) => sum + (Number(p.qty)||0)*(Number(p.price)||0), 0);
+    const laborRate = sv.laborRate != null ? (Number(sv.laborRate) || 0) : (Number(state.settings.laborRate) || 0);
+    const labor = (Number(sv.laborHours)||0) * laborRate;
+    return parts + labor;
+  }
+
   function vehicleIcon(type) {
     switch (type) {
       case 'moto': return 'bike';
@@ -182,6 +270,8 @@
       .replace(/\s*(παύλα|dash\b|-)\s*/g, '-')
       .replace(/\s*(κάτω\s*παύλα|underscore\b|_)\s*/g, '_')
       .replace(/\s+/g, ''),
+
+    name: (s) => s.toUpperCase(),
   };
 
   function initVoiceButtons() {
@@ -248,12 +338,28 @@
     '/reminders': renderReminders,
     '/scan': renderAIScan,
     '/settings': renderSettings,
+    '/advisor': renderAdvisor,
+    '/superadmin': renderSuperAdmin,
+    '/contact': renderContact,
+    '/activate': () => {
+      // Already fully licensed — nothing to do here, and the only way out of this screen
+      // besides entering a code is "Try Demo", which would silently overwrite their real
+      // workshopId/data. Send them back instead of exposing that trap to a stray click.
+      if (state.settings.workshopId && (state.settings.workshopMode === 'licensed' || state.settings.workshopMode === 'admin')) {
+        go('/dashboard');
+        return;
+      }
+      showActivationScreen();
+    },
     '/job-orders': renderJobOrders,
     '/job-orders/new': () => renderJobOrderForm(),
     '/job-orders/:id': (id) => renderJobOrderDetail(id),
     '/job-orders/:id/edit': (id) => renderJobOrderForm(id),
     '/job-orders/:id/work': (id) => renderJobOrderWork(id),
     '/schedule': renderSchedule,
+    '/stats': renderStats,
+    '/marketing': renderMarketing,
+    '/appointments': renderAppointments,
   };
 
   function matchRoute(path) {
@@ -306,7 +412,7 @@
     const back = opts.back !== false;
     const actions = opts.actions || '';
     return `
-      <div class="sticky top-0 z-20 bg-white/85 dark:bg-slate-900/85 backdrop-blur border-b border-slate-200 dark:border-slate-800">
+      <div class="sticky top-0 z-20 bg-white/85 dark:bg-slate-900/85 backdrop-blur border-b border-slate-200 dark:border-slate-800 pt-safe">
         <div class="max-w-5xl mx-auto flex items-center gap-3 px-4 py-3">
           ${back ? `<button onclick="history.back()" class="p-2 -ml-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800">${icon('arrow-left')}</button>` : ''}
           <h1 class="text-lg font-semibold flex-1 truncate">${U.escape(title)}</h1>
@@ -328,6 +434,14 @@
       .map((v) => ({ v, r: U.reminderStatus(v, servicesForVehicle(v.id), state.settings) }))
       .filter(({ r }) => r.status === 'overdue' || r.status === 'upcoming');
 
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const yearStart  = new Date(now.getFullYear(), 0, 1);
+    const revenueThisMonth = state.services.filter((sv) => sv.date && new Date(sv.date) >= monthStart).reduce((s, sv) => s + svcRevenue(sv), 0);
+    const revenueThisYear  = state.services.filter((sv) => sv.date && new Date(sv.date) >= yearStart).reduce((s, sv) => s + svcRevenue(sv), 0);
+    const sym = { EUR: '€', USD: '$', GBP: '£' }[state.settings.currency || 'EUR'] || '€';
+    const fmtRev = (n) => sym + U.fmtNum(n);
+
     $('#view').innerHTML = `
       <div class="min-h-screen flex flex-col items-center justify-center px-4 py-10 pb-28 sm:pb-12">
         <div class="w-full max-w-md space-y-8">
@@ -341,8 +455,8 @@
               <div class="w-20 h-20 bg-blue-600 rounded-3xl flex items-center justify-center mx-auto mb-4 shadow-xl shadow-blue-600/30">
                 ${icon('search','w-10 h-10 text-white')}
               </div>
-              <h1 class="text-2xl font-bold">${t('plate_search_title')}</h1>
-              <p class="text-sm text-slate-400 dark:text-slate-500 mt-1">${t('plate_search_subtitle')}</p>
+              <h1 class="text-2xl font-bold text-slate-900 dark:text-white">${t('plate_search_title')}</h1>
+              <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">${t('plate_search_subtitle')}</p>
             </div>
 
             <!-- Search card -->
@@ -363,8 +477,9 @@
                 </button>
               </div>
 
-              <!-- Hidden file input for plate photo -->
-              <input type="file" id="dash-plate-file" accept="image/*" capture="environment" class="hidden" />
+              <!-- Hidden file inputs for plate photo (camera / gallery) -->
+              <input type="file" id="dash-plate-file-cam" accept="image/*" capture="environment" class="hidden" />
+              <input type="file" id="dash-plate-file-gallery" accept="image/*" class="hidden" />
 
               <!-- Result -->
               <div id="dash-plate-result" class="mt-4 empty:hidden"></div>
@@ -376,8 +491,8 @@
         <!-- Stats panel -->
         <div class="space-y-4">
 
-          <!-- 4 stat cards -->
-          <div class="grid grid-cols-2 gap-3">
+          <!-- 6 stat cards: 2 rows of 3 on sm, 2 cols on mobile -->
+          <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
             <a href="#/vehicles" class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 flex items-center gap-3 shadow-sm">
               <div class="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-500 flex items-center justify-center flex-shrink-0">
                 ${icon('car','w-5 h-5')}
@@ -402,7 +517,7 @@
               </div>
               <div>
                 <div class="text-2xl font-bold">${pendingJOs}</div>
-                <div class="text-xs text-slate-500 dark:text-slate-400">Εκκρεμείς εντολές</div>
+                <div class="text-xs text-slate-500 dark:text-slate-400">Εκκρεμείς</div>
               </div>
             </a>
             <a href="#/reminders" class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 flex items-center gap-3 shadow-sm">
@@ -414,7 +529,74 @@
                 <div class="text-xs text-slate-500 dark:text-slate-400">Υπενθυμίσεις</div>
               </div>
             </a>
+            <a href="#/stats" class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 flex items-center gap-3 shadow-sm">
+              <div class="w-10 h-10 rounded-xl bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center flex-shrink-0">
+                ${icon('trending-up','w-5 h-5')}
+              </div>
+              <div>
+                <div class="text-lg font-bold leading-tight">${fmtRev(revenueThisMonth)}</div>
+                <div class="text-xs text-slate-500 dark:text-slate-400">Έσοδα μήνα</div>
+              </div>
+            </a>
+            <a href="#/stats" class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 flex items-center gap-3 shadow-sm">
+              <div class="w-10 h-10 rounded-xl bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 flex items-center justify-center flex-shrink-0">
+                ${icon('bar-chart-2','w-5 h-5')}
+              </div>
+              <div>
+                <div class="text-lg font-bold leading-tight">${fmtRev(revenueThisYear)}</div>
+                <div class="text-xs text-slate-500 dark:text-slate-400">Έσοδα έτους</div>
+              </div>
+            </a>
           </div>
+
+          <!-- Quick actions -->
+          <div class="grid grid-cols-2 gap-2">
+            <a href="#/services/new" class="bg-blue-600 hover:bg-blue-700 text-white rounded-2xl p-3 flex items-center gap-2 font-medium text-sm transition-colors">
+              ${icon('wrench','w-4 h-4 flex-shrink-0')} Νέο Service
+            </a>
+            <a href="#/job-orders/new" class="bg-amber-500 hover:bg-amber-600 text-white rounded-2xl p-3 flex items-center gap-2 font-medium text-sm transition-colors">
+              ${icon('clipboard-check','w-4 h-4 flex-shrink-0')} Νέα Εντολή
+            </a>
+            <a href="#/marketing" class="bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl p-3 flex items-center gap-2 font-medium text-sm transition-colors">
+              ${icon('megaphone','w-4 h-4 flex-shrink-0')} Marketing
+            </a>
+            <a href="#/stats" class="bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl p-3 flex items-center gap-2 font-medium text-sm transition-colors">
+              ${icon('bar-chart-2','w-4 h-4 flex-shrink-0')} Στατιστικά
+            </a>
+          </div>
+
+          <!-- Upcoming appointments today/tomorrow -->
+          ${(() => {
+            const todayStr = U.localDateStr();
+            const tomorrowStr = U.localDateStr(Date.now() + 86400000);
+            const soon = (state.appointments || [])
+              .filter((a) => !['completed','cancelled'].includes(a.status) && (a.date === todayStr || a.date === tomorrowStr))
+              .sort((x, y) => (x.date + x.time).localeCompare(y.date + y.time));
+            if (!soon.length) return '';
+            return `
+            <div>
+              <h2 class="text-sm font-semibold text-slate-600 dark:text-slate-400 mb-2 flex items-center gap-1.5">
+                ${icon('calendar','w-4 h-4')} Ραντεβού σήμερα/αύριο
+              </h2>
+              <div class="space-y-2">
+                ${soon.map((a) => {
+                  const c = customerById(a.customerId);
+                  const v = a.vehicleId ? vehicleById(a.vehicleId) : null;
+                  const isToday = a.date === todayStr;
+                  return `<a href="#/appointments" class="flex items-center gap-3 bg-white dark:bg-slate-800 rounded-2xl border border-blue-200 dark:border-blue-900/40 p-3 shadow-sm">
+                    <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${isToday ? 'bg-blue-600 text-white' : 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'} text-xs font-bold tabular-nums">${a.time}</div>
+                    <div class="flex-1 min-w-0">
+                      <div class="font-semibold text-sm truncate">${U.escape(c?.name || '—')}</div>
+                      ${v ? `<div class="text-xs text-slate-500 truncate">${U.escape(vehicleLabel(v))}</div>` : ''}
+                    </div>
+                    <div class="text-xs font-medium flex-shrink-0 ${isToday ? 'text-blue-600 dark:text-blue-400' : 'text-slate-400'}">
+                      ${isToday ? 'Σήμερα' : 'Αύριο'}
+                    </div>
+                  </a>`;
+                }).join('')}
+              </div>
+            </div>`;
+          })()}
 
           <!-- Vehicles needing service -->
           ${overdueVehicles.length ? `
@@ -444,6 +626,45 @@
           </div>
           ` : ''}
 
+          <!-- ΚΤΕΟ / emissions expiring within 14 days -->
+          ${(() => {
+            const kteoSoon = state.vehicles
+              .map((v) => ({ v, st: kteoStatus(v), kind: 'kteo' }))
+              .filter((x) => x.st && x.st.daysLeft >= 0 && x.st.daysLeft <= 14);
+            const emSoon = state.vehicles
+              .map((v) => ({ v, st: emissionsStatus(v), kind: 'emissions' }))
+              .filter((x) => x.st && x.st.daysLeft >= 0 && x.st.daysLeft <= 14);
+            const combined = [...kteoSoon, ...emSoon].sort((a, b) => a.st.daysLeft - b.st.daysLeft);
+            if (!combined.length) return '';
+            return `
+            <div>
+              <h2 class="text-sm font-semibold text-blue-600 dark:text-blue-400 mb-2 flex items-center gap-1.5">
+                ${icon('shield-alert','w-4 h-4')} ΚΤΕΟ / Καυσαέρια λήγουν (14μ.)
+              </h2>
+              <div class="space-y-2">
+                ${combined.map(({ v, st, kind }) => {
+                  const c = customerById(v.customerId);
+                  const label = kind === 'kteo' ? 'ΚΤΕΟ' : 'Καυσαέρια';
+                  const icoName = kind === 'kteo' ? 'shield-check' : 'wind';
+                  return `<a href="#/vehicles/${v.id}" class="flex items-center gap-3 bg-white dark:bg-slate-800 rounded-2xl border border-blue-200 dark:border-blue-900/40 p-3 shadow-sm">
+                    <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
+                      ${icon(icoName,'w-5 h-5')}
+                    </div>
+                    <div class="flex-1 min-w-0">
+                      <div class="font-semibold text-sm truncate">${U.escape((v.plate || '').toUpperCase())} · ${U.escape(v.brand || '')} ${U.escape(v.model || '')}</div>
+                      ${c ? `<div class="text-xs text-slate-500 dark:text-slate-400 truncate">${U.escape(c.name)}</div>` : ''}
+                    </div>
+                    <div class="text-xs font-medium flex-shrink-0 text-blue-600 dark:text-blue-400 text-right">
+                      <div>${label}</div>
+                      <div>${st.daysLeft === 0 ? 'Σήμερα!' : `${st.daysLeft}μ.`}</div>
+                    </div>
+                  </a>`;
+                }).join('')}
+              </div>
+              <a href="#/reminders" class="mt-2 text-xs text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1">${icon('arrow-right','w-3 h-3')} Όλες οι υπενθυμίσεις</a>
+            </div>`;
+          })()}
+
         </div>
 
         </div>
@@ -452,33 +673,6 @@
     refreshIcons();
 
     // ---------- plate lookup ----------
-    function normPlate(p) {
-      // Remove spaces/dashes first, then uppercase
-      let s = (p || '').toUpperCase().replace(/[\s\-_.]/g, '');
-
-      // Convert spelled-out Greek letter names → single letter (longest first to avoid partial matches)
-      // Voice recognition says "ΜΙ ΝΙ ΡΟ" → writes "ΜΙΝΙΡΟ" → we decode back to "ΜΝΡ"
-      const NAMES = [
-        ['ΟΜΙΚΡΟΝ','Ο'],
-        ['ΕΨΙΛΟΝ','Ε'],['ΛΑΜΒΔΑ','Λ'],['ΥΨΙΛΟΝ','Υ'],['ΟΜΙΚΡΟ','Ο'],
-        ['ΓΑΜΜΑ','Γ'],['ΔΕΛΤΑ','Δ'],['ΚΑΠΠΑ','Κ'],['ΛΑΜΔΑ','Λ'],['ΣΙΓΜΑ','Σ'],['ΩΜΕΓΑ','Ω'],['ΕΨΙΛΟ','Ε'],['ΥΨΙΛΟ','Υ'],
-        ['ΑΛΦΑ','Α'],['ΒΗΤΑ','Β'],['ΒΙΤΑ','Β'],['ΓΑΜΑ','Γ'],['ΖΗΤΑ','Ζ'],['ΖΙΤΑ','Ζ'],['ΘΗΤΑ','Θ'],['ΘΙΤΑ','Θ'],['ΙΩΤΑ','Ι'],
-        ['ΗΤΑ','Η'],['ΤΑΥ','Τ'],['ΤΑΦ','Τ'],
-        ['ΜΙ','Μ'],['ΜΥ','Μ'],['ΝΙ','Ν'],['ΝΥ','Ν'],['ΡΟ','Ρ'],['ΡΩ','Ρ'],
-        ['ΠΙ','Π'],['ΦΙ','Φ'],['ΧΙ','Χ'],['ΨΙ','Ψ'],['ΞΙ','Ξ'],
-      ];
-      for (const [name, letter] of NAMES) {
-        s = s.split(name).join(letter);
-      }
-
-      // Keep only letters and digits
-      s = s.replace(/[^A-ZΑ-ΩΆΈΉΊΌΎΏ0-9]/g, '');
-
-      // Greek plate format: max 3 letters + max 4 digits
-      const letters = s.replace(/[0-9]/g, '').slice(0, 3);
-      const digits  = s.replace(/[^0-9]/g, '').slice(0, 4);
-      return letters + digits;
-    }
     function plateLookup() {
       const raw = normPlate($('#dash-plate')?.value || '');
       if (!raw) return;
@@ -520,7 +714,7 @@
             <p class="text-slate-500 text-xs">Καταχώρησε το νέο όχημα</p>
           </div>
           <div class="flex flex-col gap-2">
-            <button onclick="go('/scan')" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold py-3.5 rounded-2xl flex items-center justify-center gap-2 transition-colors">
+            <button onclick="sessionStorage.setItem('scan_expected_plate','${raw}');go('/scan')" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold py-3.5 rounded-2xl flex items-center justify-center gap-2 transition-colors">
               ${icon('scan-line','w-5 h-5')} Σκανάρισμα εγγράφου (AI)
             </button>
             <button onclick="go('/vehicles/new')" class="w-full bg-white/15 hover:bg-white/25 text-white font-medium py-3 rounded-2xl flex items-center justify-center gap-2 transition-colors text-sm">
@@ -590,10 +784,48 @@
     }
     $('#dash-plate-btn')?.addEventListener('click', plateLookup);
 
-    const fileInput = $('#dash-plate-file');
-    $('#dash-plate-cam')?.addEventListener('click', () => fileInput?.click());
-    fileInput?.addEventListener('change', () => {
-      if (fileInput.files?.[0]) platePhotoOCR(fileInput.files[0]);
+    const fileCam = $('#dash-plate-file-cam');
+    const fileGallery = $('#dash-plate-file-gallery');
+
+    $('#dash-plate-cam')?.addEventListener('click', () => {
+      const sheet = document.createElement('div');
+      sheet.className = 'fixed inset-0 z-50 flex items-end justify-center bg-black/40 backdrop-blur-sm p-4';
+      sheet.innerHTML = `
+        <div class="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-sm shadow-2xl p-4 space-y-2">
+          <div class="text-center text-xs text-slate-400 font-medium pb-1">Επιλογή φωτογραφίας πινακίδας</div>
+          <button id="sheet-cam" class="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors text-left">
+            <div class="w-10 h-10 rounded-xl bg-purple-100 dark:bg-purple-900/40 text-purple-600 flex items-center justify-center flex-shrink-0">
+              ${icon('camera','w-5 h-5')}
+            </div>
+            <div>
+              <div class="font-medium text-sm">Κάμερα</div>
+              <div class="text-xs text-slate-400">Τράβηξε φωτογραφία τώρα</div>
+            </div>
+          </button>
+          <button id="sheet-gallery" class="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors text-left">
+            <div class="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-900/40 text-blue-600 flex items-center justify-center flex-shrink-0">
+              ${icon('image','w-5 h-5')}
+            </div>
+            <div>
+              <div class="font-medium text-sm">Άλμπουμ</div>
+              <div class="text-xs text-slate-400">Επίλεξε από τη συλλογή σου</div>
+            </div>
+          </button>
+          <button id="sheet-cancel" class="w-full text-center text-sm text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 py-2.5 font-medium transition-colors">Ακύρωση</button>
+        </div>`;
+      document.body.appendChild(sheet);
+      refreshIcons();
+      sheet.querySelector('#sheet-cam').addEventListener('click', () => { sheet.remove(); fileCam?.click(); });
+      sheet.querySelector('#sheet-gallery').addEventListener('click', () => { sheet.remove(); fileGallery?.click(); });
+      sheet.querySelector('#sheet-cancel').addEventListener('click', () => sheet.remove());
+      sheet.addEventListener('click', (e) => { if (e.target === sheet) sheet.remove(); });
+    });
+
+    fileCam?.addEventListener('change', () => {
+      if (fileCam.files?.[0]) platePhotoOCR(fileCam.files[0]);
+    });
+    fileGallery?.addEventListener('change', () => {
+      if (fileGallery.files?.[0]) platePhotoOCR(fileGallery.files[0]);
     });
   }
 
@@ -703,6 +935,13 @@
     if (!c) { go('/customers'); return; }
     const vs = vehiclesForCustomer(id);
 
+    // Customer stats
+    const cSvcs = state.services.filter((sv) => vs.some((v) => v.id === sv.vehicleId));
+    const totalSpent = cSvcs.reduce((sum, sv) => sum + svcRevenue(sv), 0);
+    const lastSvc = cSvcs.slice().sort((a, b) => new Date(b.date) - new Date(a.date))[0];
+    const sym = { EUR: '€', USD: '$', GBP: '£' }[state.settings.currency || 'EUR'] || '€';
+    const sinceDate = c.createdAt ? U.fmtDate(c.createdAt) : '—';
+
     $('#view').innerHTML = `
       ${pageHeader(c.name, {
         actions: `
@@ -711,6 +950,27 @@
         `
       })}
       <div class="max-w-5xl mx-auto p-4 pb-24 sm:pb-4 space-y-4">
+
+        <!-- Customer KPIs -->
+        <div class="grid grid-cols-4 gap-2">
+          <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-center">
+            <div class="text-lg font-bold text-blue-600 dark:text-blue-400">${cSvcs.length}</div>
+            <div class="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">Service</div>
+          </div>
+          <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-center">
+            <div class="text-lg font-bold text-emerald-600 dark:text-emerald-400">${sym}${U.fmtNum(totalSpent)}</div>
+            <div class="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">Σύνολο</div>
+          </div>
+          <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-center">
+            <div class="text-sm font-bold">${lastSvc ? U.fmtDate(lastSvc.date) : '—'}</div>
+            <div class="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">Τελ. service</div>
+          </div>
+          <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-center">
+            <div class="text-sm font-bold">${sinceDate}</div>
+            <div class="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">Πελάτης από</div>
+          </div>
+        </div>
+
         <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-2">
           ${c.phone ? `<div class="flex items-center gap-2"><span class="text-slate-400">${icon('phone','w-4 h-4')}</span><a href="tel:${U.escape(c.phone)}" class="text-blue-700 dark:text-blue-500">${U.escape(c.phone)}</a></div>` : ''}
           ${c.email ? `<div class="flex items-center gap-2"><span class="text-slate-400">${icon('mail','w-4 h-4')}</span><a href="mailto:${U.escape(c.email)}" class="text-blue-700 dark:text-blue-500">${U.escape(c.email)}</a></div>` : ''}
@@ -722,8 +982,8 @@
           ${c.phone ? `
             <div class="flex gap-2 pt-3 border-t border-slate-100 dark:border-slate-700">
               <a target="_blank" href="${U.whatsappLink(c.phone, '')}" class="flex-1 bg-green-500 hover:bg-green-600 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('message-circle','w-4 h-4')} WhatsApp</a>
-              <a href="${U.viberLink(c.phone, '')}" class="flex-1 bg-purple-500 hover:bg-purple-600 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('phone','w-4 h-4')} Viber</a>
-              <a href="tel:${U.escape(c.phone)}" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('phone-call','w-4 h-4')} ${t('open')}</a>
+              <a href="${U.smsLink(c.phone, '')}" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('message-square','w-4 h-4')} SMS</a>
+              <a href="tel:${U.escape(c.phone)}" class="flex-1 bg-slate-600 hover:bg-slate-700 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('phone-call','w-4 h-4')} ${t('open')}</a>
             </div>
           ` : ''}
         </div>
@@ -744,11 +1004,13 @@
 
     $('#del-customer').addEventListener('click', async () => {
       if (!confirm(t('confirm_delete'))) return;
-      // delete cascade: services & vehicles
       for (const v of vs) {
+        const vJOs = state.jobOrders.filter((j) => j.vehicleId === v.id);
+        for (const j of vJOs) await DB.remove('job_orders', j.id);
         for (const s of servicesForVehicle(v.id)) await DB.remove('services', s.id);
         await DB.remove('vehicles', v.id);
       }
+      for (const a of (state.appointments || []).filter((a) => a.customerId === c.id)) await DB.remove('appointments', a.id);
       await DB.remove('customers', c.id);
       U.toast(t('deleted'));
       go('/customers');
@@ -781,9 +1043,10 @@
           <div>
             <label class="block text-sm font-medium mb-1">${t('customer_name')} <span class="text-red-500">*</span></label>
             <div class="flex gap-2">
-              <input type="text" name="name" id="cf-name" value="${U.escape(c.name || pendingName)}" required autocomplete="name" data-vi="1"
+              <input type="text" name="name" id="cf-name" value="${U.escape((c.name || pendingName || '').toUpperCase())}" required autocomplete="name" data-vi="1"
+                oninput="this.value=this.value.toUpperCase()"
                 class="flex-1 min-w-0 px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              ${micBtn('cf-name')}
+              ${micBtn('cf-name', { transform: 'name' })}
             </div>
           </div>
           <div>
@@ -804,13 +1067,9 @@
           <!-- Contact methods (multi-select) -->
           <div>
             <label class="block text-sm font-medium mb-1">Τρόποι επικοινωνίας <span class="text-xs font-normal text-slate-400">(επίλεξε όσους έχει ο πελάτης)</span></label>
-            <div class="grid grid-cols-3 gap-2" id="cm-grid">
+            <div class="grid grid-cols-2 gap-2" id="cm-grid">
               <button type="button" data-cm="sms" class="cm-btn flex flex-col items-center gap-1.5 py-3 rounded-xl border-2 border-slate-200 dark:border-slate-700 text-sm font-medium transition-all">
-                ${icon('message-circle','w-5 h-5')} SMS
-              </button>
-              <button type="button" data-cm="viber" class="cm-btn flex flex-col items-center gap-1.5 py-3 rounded-xl border-2 border-slate-200 dark:border-slate-700 text-sm font-medium transition-all">
-                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M11.4 0C5.2.4.6 5.2.6 11.4c0 2.2.6 4.3 1.8 6.1l-1.2 4.4 4.5-1.2c1.7 1 3.7 1.6 5.7 1.6 6.2 0 11-4.8 11.4-11C23 4.8 17.8-.4 11.4 0zm5.7 15.6c-.2.6-.9 1.1-1.6 1.2-.4.1-.9.1-1.4 0-2.7-.7-4.9-2.5-6.4-4.9-.8-1.3-1.3-2.7-1.4-4.2 0-.7.2-1.4.7-1.9.3-.3.6-.5.9-.5h.8c.3 0 .5.2.7.5l1 2.2c.1.3 0 .6-.2.8l-.6.7c-.1.2-.1.4 0 .6.5 1 1.3 1.9 2.3 2.5.2.1.4.1.6 0l.7-.7c.2-.2.5-.3.8-.2l2.2 1c.3.2.5.4.5.7v.8c0 .2-.1.3-.2.4h-.4z"/></svg>
-                Viber
+                ${icon('message-square','w-5 h-5')} SMS
               </button>
               <button type="button" data-cm="whatsapp" class="cm-btn flex flex-col items-center gap-1.5 py-3 rounded-xl border-2 border-slate-200 dark:border-slate-700 text-sm font-medium transition-all">
                 <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.123.555 4.116 1.529 5.843L0 24l6.306-1.505A11.945 11.945 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 22c-1.886 0-3.655-.493-5.193-1.357l-.371-.22-3.747.895.93-3.65-.24-.385A9.96 9.96 0 012 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10z"/></svg>
@@ -827,7 +1086,7 @@
       </div>
     `;
     // Contact methods — multi-select toggle buttons
-    const cmActive = { sms:'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700', viber:'border-violet-500 bg-violet-50 dark:bg-violet-900/20 text-violet-600', whatsapp:'border-green-500 bg-green-50 dark:bg-green-900/20 text-green-600' };
+    const cmActive = { sms:'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700', whatsapp:'border-green-500 bg-green-50 dark:bg-green-900/20 text-green-600' };
     const cmInactive = 'border-slate-200 dark:border-slate-700 text-slate-500';
     // Load existing: new field contactMethods[] or legacy preferredContact string
     const existingMethods = c.contactMethods
@@ -852,6 +1111,10 @@
     $('#customer-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const data = formData(e.target);
+      if (!id && state.settings.workshopMode === 'demo' && state.customers.filter((c) => !c.id.startsWith('demo-')).length >= 3) {
+        U.toast('Λειτουργία Demo: μέχρι 3 δωρεάν καταχωρήσεις. Ενεργοποιήστε για απεριόριστη χρήση.', 'error');
+        return;
+      }
       if (id) data.id = id;
       const saved = await DB.add('customers', data);
       U.toast(t('saved'));
@@ -1088,6 +1351,7 @@
           <div class="flex border-t border-slate-100 dark:border-slate-800">
             <button data-tab="history" class="tab-btn tab-active px-4 py-3 text-sm font-semibold">${t('vehicle_history')}</button>
             <button data-tab="info" class="tab-btn tab-inactive px-4 py-3 text-sm font-medium">${t('vehicle')}</button>
+            <button data-tab="maintenance" class="tab-btn tab-inactive px-4 py-3 text-sm font-medium">Πρόγραμμα</button>
           </div>
         </div>
       </div>
@@ -1172,8 +1436,66 @@
               ${r.days != null ? `<div class="text-xs ${r.status==='overdue'?'text-red-500':r.status==='upcoming'?'text-amber-500':'text-slate-400'}">${r.status==='overdue'?t('overdue_by',{n:-r.days}):t('days_left',{n:r.days})}</div>` : ''}
             </div>
           </div>
+          ${(v.kteoExpiry || v.emissionsExpiry) ? `
+          <div class="space-y-2">
+            <div class="flex items-center gap-1.5 text-xs font-semibold text-slate-500 uppercase tracking-wide px-1">
+              ${icon('shield-check','w-3.5 h-3.5')} ΚΤΕΟ &amp; Καυσαέρια
+            </div>
+            ${kteoStatusBadge(kteoStatus(v), 'ΚΤΕΟ', 'shield-check')}
+            ${kteoStatusBadge(emissionsStatus(v), 'Κάρτα Καυσαερίων', 'wind')}
+          </div>` : ''}
         </div>
       `;
+      refreshIcons();
+    }
+
+    function renderMaintenanceTab() {
+      const tc = $('#tab-content');
+      const entry = window.MAINT_DB ? window.MAINT_DB.find(v.brand, v.model, v.fuel) : null;
+      if (!entry) {
+        tc.innerHTML = `
+          <div class="p-8 text-center text-slate-400 text-sm">
+            <div class="w-14 h-14 mx-auto bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mb-3">${icon('wrench','w-7 h-7')}</div>
+            Δεν βρέθηκαν δεδομένα για αυτό το όχημα.
+          </div>`;
+        return;
+      }
+      const catColors = { oil:'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300', filter:'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300', timing:'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300', brake:'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300', tire:'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300', fluid:'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300', spark:'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300', ac:'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-300', misc:'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' };
+      const catLabel = { oil:'Λάδι', filter:'Φίλτρο', timing:'Χρονισμός', brake:'Φρένα', tire:'Ελαστικά', fluid:'Υγρά', spark:'Μπουζί', ac:'A/C', misc:'Γενικά' };
+      const rows = entry.services.map(s => `
+        <tr class="border-t border-slate-100 dark:border-slate-700">
+          <td class="px-3 py-2.5 text-sm font-medium">${s.n}</td>
+          <td class="px-3 py-2.5 text-sm text-slate-500 dark:text-slate-400 text-right whitespace-nowrap">${[s.km ? s.km.toLocaleString()+' km' : null, s.months ? s.months+' μήνες' : null].filter(Boolean).join(' / ') || '—'}</td>
+          <td class="px-3 py-2.5"><span class="text-xs font-medium px-2 py-0.5 rounded-full ${catColors[s.cat]||catColors.misc}">${catLabel[s.cat]||s.cat}</span></td>
+          <td class="px-3 py-2.5 text-xs text-slate-400">${s.note||''}</td>
+        </tr>
+        ${s.warn ? `<tr class="bg-red-50 dark:bg-red-900/10"><td colspan="4" class="px-3 py-1.5 text-xs text-red-600 dark:text-red-400 font-medium">${icon('alert-triangle','w-3.5 h-3.5 inline mr-1')}${s.warn}</td></tr>` : ''}
+      `).join('');
+      tc.innerHTML = `
+        <div class="p-4 space-y-3">
+          <div class="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+            <div class="px-4 py-3 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between">
+              <div>
+                <div class="font-semibold text-sm">${entry.make} ${entry.models.join(' / ')}</div>
+                <div class="text-xs text-slate-400">${entry.years}${entry.fuel ? ' · '+entry.fuel : ''}</div>
+              </div>
+              ${entry.timing ? `<span class="text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 px-2 py-1 rounded-full font-medium">${icon('clock','w-3 h-3 inline mr-0.5')}${entry.timing}</span>` : ''}
+            </div>
+            ${entry.note ? `<div class="px-4 py-2 text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/10 border-b border-amber-100 dark:border-amber-900/30">${icon('info','w-3.5 h-3.5 inline mr-1')}${entry.note}</div>` : ''}
+            <div class="overflow-x-auto">
+              <table class="w-full text-left">
+                <thead><tr class="bg-slate-50 dark:bg-slate-900/50 text-xs text-slate-400 uppercase tracking-wide">
+                  <th class="px-3 py-2 font-semibold">Εργασία</th>
+                  <th class="px-3 py-2 font-semibold text-right">Διάστημα</th>
+                  <th class="px-3 py-2 font-semibold">Κατηγορία</th>
+                  <th class="px-3 py-2 font-semibold">Σημείωση</th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+              </table>
+            </div>
+          </div>
+          <p class="text-xs text-slate-400 px-1">* Τα παραπάνω αφορούν ενδεικτικά διαστήματα service. Ακολουθείτε πάντα το εγχειρίδιο κατασκευαστή.</p>
+        </div>`;
       refreshIcons();
     }
 
@@ -1187,6 +1509,7 @@
         btn.classList.remove('tab-inactive'); btn.classList.add('tab-active');
         destroyCharts();
         if (btn.dataset.tab === 'history') renderHistoryTab();
+        else if (btn.dataset.tab === 'maintenance') renderMaintenanceTab();
         else renderInfoTab();
       });
     });
@@ -1194,14 +1517,27 @@
     $('#del-vehicle').addEventListener('click', async () => {
       if (!confirm(t('confirm_delete'))) return;
       destroyCharts();
+      const vJOs = state.jobOrders.filter((j) => j.vehicleId === v.id);
+      for (const j of vJOs) await DB.remove('job_orders', j.id);
       for (const s of services) await DB.remove('services', s.id);
+      for (const a of (state.appointments || []).filter((a) => a.vehicleId === v.id)) await DB.remove('appointments', a.id);
       await DB.remove('vehicles', v.id);
       U.toast(t('deleted'));
       go('/vehicles');
     });
 
     $('#send-reminder').addEventListener('click', () => openReminderDialog(v, c));
-    $('#send-history').addEventListener('click', () => openShareHistoryDialog(v, c, services));
+    $('#send-history').addEventListener('click', async () => {
+      const lines = [];
+      lines.push(state.settings.workshopName || t('app_name'));
+      lines.push(`${t('vehicle_history')} - ${vehicleLabel(v)}`);
+      lines.push('');
+      services.forEach((s) => {
+        lines.push(`• ${U.fmtDate(s.date)} - ${s.mileage ? Number(s.mileage).toLocaleString() + ' km' : ''}`);
+        if (s.description) lines.push('  ' + s.description.split('\n')[0]);
+      });
+      await U.share(vehicleLabel(v), lines.join('\n'));
+    });
   }
 
   function kv(label, value, full) {
@@ -1355,6 +1691,29 @@
 
           ${formTextArea('notes', t('notes'), v.notes, { voice: true })}
 
+          <!-- ΚΤΕΟ & Καυσαέρια -->
+          <div class="rounded-2xl border border-slate-200 dark:border-slate-700 p-4 space-y-3">
+            <div class="flex items-center gap-2 font-semibold text-sm">
+              ${icon('shield-check','w-4 h-4 text-blue-500')}
+              ΚΤΕΟ &amp; Κάρτα Καυσαερίων
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-medium text-slate-500 mb-1">Λήξη ΚΤΕΟ (από αυτοκόλλητο)</label>
+                <input type="month" name="kteoExpiry" id="vf-kteo"
+                  value="${v.kteoExpiry || ''}"
+                  class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-slate-500 mb-1">Κάρτα Καυσαερίων (αυτόματο −1 έτος)</label>
+                <input type="month" name="emissionsExpiry" id="vf-emissions"
+                  value="${v.emissionsExpiry || ''}"
+                  class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+            </div>
+            <p class="text-xs text-slate-400">Η κάρτα καυσαερίων συμπληρώνεται αυτόματα 1 χρόνο πριν τη λήξη ΚΤΕΟ. Μπορείτε να την τροποποιήσετε.</p>
+          </div>
+
           <div class="flex gap-2 pt-2">
             <button type="submit" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 rounded-lg">${t('save')}</button>
             <button type="button" onclick="history.back()" class="flex-1 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 font-medium py-2.5 rounded-lg">${t('cancel')}</button>
@@ -1394,6 +1753,18 @@
     // Plate uppercase
     $('#vf-plate')?.addEventListener('input', (e) => { e.target.value = e.target.value.toUpperCase(); });
 
+    // ΚΤΕΟ: auto-fill emissions = kteo - 12 months
+    $('#vf-kteo')?.addEventListener('change', (e) => {
+      const val = e.target.value; // YYYY-MM
+      if (!val) return;
+      const [y, m] = val.split('-').map(Number);
+      let ey = y, em = m - 12;
+      if (em <= 0) { ey -= 1; em += 12; }
+      const emField = $('#vf-emissions');
+      if (emField && !emField._userEdited) emField.value = `${ey}-${String(em).padStart(2,'0')}`;
+    });
+    $('#vf-emissions')?.addEventListener('change', (e) => { e.target._userEdited = true; });
+
     $('#reg-file').addEventListener('change', async (e) => {
       const file = e.target.files[0];
       if (!file) return;
@@ -1411,6 +1782,10 @@
     $('#vehicle-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const data = formData(e.target);
+      if (!id && state.settings.workshopMode === 'demo' && state.vehicles.filter((v) => !v.id.startsWith('demo-')).length >= 3) {
+        U.toast('Λειτουργία Demo: μέχρι 3 δωρεάν καταχωρήσεις. Ενεργοποιήστε για απεριόριστη χρήση.', 'error');
+        return;
+      }
       if (data.year) data.year = String(data.year);
       if (data.mileage) data.mileage = Number(data.mileage);
       if (id) data.id = id;
@@ -1555,15 +1930,7 @@
     });
 
     $('#btn-pdf').addEventListener('click', async () => {
-      await U.servicePdf({
-        workshop: {
-          name: state.settings.workshopName,
-          address: state.settings.workshopAddress,
-          phone: state.settings.workshopPhone,
-          email: state.settings.workshopEmail,
-        },
-        customer: c, vehicle: v, service: s,
-      });
+      await serviceHtmlPdf(s, v, c);
     });
 
     $('#btn-print').addEventListener('click', () => window.print());
@@ -1576,7 +1943,7 @@
     if (id && !s) { go('/services'); return; }
     if (!id) {
       s = {
-        date: new Date().toISOString().slice(0, 10),
+        date: U.localDateStr(),
       };
       const qs = new URLSearchParams(location.hash.split('?')[1] || '');
       if (qs.get('vehicle')) s.vehicleId = qs.get('vehicle');
@@ -1609,7 +1976,7 @@
           </div>
 
           <div class="grid grid-cols-2 gap-3">
-            ${formField('date', t('service_date'), s.date ? s.date.slice(0,10) : new Date().toISOString().slice(0,10), { type: 'date', required: true })}
+            ${formField('date', t('service_date'), s.date ? s.date.slice(0,10) : U.localDateStr(), { type: 'date', required: true })}
             ${formField('mileage', t('service_mileage'), s.mileage, { type: 'number' })}
           </div>
 
@@ -1639,7 +2006,7 @@
 
           ${formTextArea('description', t('service_description'), s.description, { rows: 3, voice: true })}
 
-          ${formField('mechanic', t('service_mechanic'), s.mechanic, { voice: true })}
+          ${mechanicSelect('mechanic', s.mechanic)}
 
           <div class="grid grid-cols-2 gap-3">
             ${formField('nextServiceDate', t('service_next_date'), s.nextServiceDate ? s.nextServiceDate.slice(0,10) : '', { type: 'date' })}
@@ -1850,10 +2217,22 @@
     const overdue = all.filter((r) => r.status === 'overdue');
     const upcoming = all.filter((r) => r.status === 'upcoming');
 
+    // KTEO / emissions upcoming (show if ≤60 days or expired)
+    const kteoItems = state.vehicles
+      .map((v) => ({ v, st: kteoStatus(v) }))
+      .filter((x) => x.st && x.st.daysLeft <= 60)
+      .sort((a, b) => a.st.daysLeft - b.st.daysLeft);
+    const emissionsItems = state.vehicles
+      .map((v) => ({ v, st: emissionsStatus(v) }))
+      .filter((x) => x.st && x.st.daysLeft <= 60)
+      .sort((a, b) => a.st.daysLeft - b.st.daysLeft);
+
+    const anyItems = all.length || kteoItems.length || emissionsItems.length;
+
     $('#view').innerHTML = `
       ${pageHeader(t('reminders'), { back: false })}
       <div class="max-w-5xl mx-auto p-4 pb-24 sm:pb-4">
-        ${!all.length ? emptyState('bell-off', t('no_reminders'), '', '') : ''}
+        ${!anyItems ? emptyState('bell-off', t('no_reminders'), '', '') : ''}
         ${overdue.length ? `
           <div class="mb-6">
             <h2 class="text-sm font-semibold text-red-600 dark:text-red-400 mb-2 flex items-center gap-1">${icon('alert-circle','w-4 h-4')} ${t('reminders_overdue')} (${overdue.length})</h2>
@@ -1866,10 +2245,22 @@
             <div class="space-y-2">${upcoming.map(reminderCard).join('')}</div>
           </div>
         ` : ''}
+        ${kteoItems.length ? `
+          <div class="mb-6">
+            <h2 class="text-sm font-semibold text-blue-600 dark:text-blue-400 mb-2 flex items-center gap-1">${icon('shield-check','w-4 h-4')} ΚΤΕΟ (${kteoItems.length})</h2>
+            <div class="space-y-2">${kteoItems.map((x) => kteoReminderCard(x.v, x.st, 'kteo')).join('')}</div>
+          </div>
+        ` : ''}
+        ${emissionsItems.length ? `
+          <div class="mb-6">
+            <h2 class="text-sm font-semibold text-cyan-600 dark:text-cyan-400 mb-2 flex items-center gap-1">${icon('wind','w-4 h-4')} Κάρτα Καυσαερίων (${emissionsItems.length})</h2>
+            <div class="space-y-2">${emissionsItems.map((x) => kteoReminderCard(x.v, x.st, 'emissions')).join('')}</div>
+          </div>
+        ` : ''}
       </div>
     `;
 
-    // Wire up reminder buttons
+    // Wire up service reminder buttons
     $$('[data-reminder]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const vid = btn.dataset.reminder;
@@ -1878,6 +2269,91 @@
         openReminderDialog(v, c);
       });
     });
+
+    // Wire up kteo/emissions send buttons
+    $$('[data-kteo-send]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const vid = btn.dataset.kteoSend;
+        const kind = btn.dataset.kteoKind;
+        const v = vehicleById(vid);
+        const c = customerById(v.customerId);
+        openKteoReminderDialog(v, c, kind);
+      });
+    });
+  }
+
+  function kteoReminderCard(v, st, kind) {
+    const c = customerById(v.customerId);
+    const isCritical = st.status === 'critical' || st.status === 'expired';
+    const label = kind === 'kteo' ? 'ΚΤΕΟ' : 'Κάρτα Καυσαερίων';
+    const iconName = kind === 'kteo' ? 'shield-check' : 'wind';
+    const colorCls = isCritical
+      ? 'border-red-200 dark:border-red-900/50'
+      : 'border-amber-200 dark:border-amber-900/50';
+    const iconBg = isCritical
+      ? 'bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-300'
+      : 'bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-300';
+    const dayTxt = st.daysLeft < 0 ? `Ληγμένο (${-st.daysLeft}μ.)` : st.daysLeft === 0 ? 'Λήγει σήμερα!' : `${st.daysLeft} ημέρες`;
+    const dayColor = isCritical ? 'text-red-600 dark:text-red-300' : 'text-amber-600 dark:text-amber-300';
+    const kteoMsg = buildKteoMsg(v, c, kind);
+    return `
+      <div class="bg-white dark:bg-slate-800 rounded-xl border ${colorCls} p-3">
+        <div class="flex items-center gap-3 mb-2">
+          <div class="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${iconBg}">
+            ${icon(iconName,'w-5 h-5')}
+          </div>
+          <div class="flex-1 min-w-0">
+            <a href="#/vehicles/${v.id}" class="font-medium truncate block">${U.escape(vehicleLabel(v))}</a>
+            <div class="text-xs text-slate-500 dark:text-slate-400 truncate">${U.escape(c?.name || '—')} • ${c?.phone ? U.escape(c.phone) : ''}</div>
+          </div>
+          <div class="text-xs font-medium text-right ${dayColor}">
+            ${dayTxt}
+            <div class="text-slate-400 font-normal">${label} ${fmtMonth(st.month)}</div>
+          </div>
+        </div>
+        ${c?.phone ? `
+          <div class="grid grid-cols-3 gap-2">
+            <button data-kteo-send="${v.id}" data-kteo-kind="${kind}" class="bg-amber-500 hover:bg-amber-600 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('send','w-4 h-4')} Αποστολή</button>
+            <a target="_blank" href="${U.whatsappLink(c.phone, kteoMsg)}" class="bg-green-500 hover:bg-green-600 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('message-circle','w-4 h-4')} WhatsApp</a>
+            <a href="${U.smsLink(c.phone, kteoMsg)}" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('message-square','w-4 h-4')} SMS</a>
+          </div>
+        ` : `<div class="text-xs italic text-slate-400 pt-1">Χωρίς αριθμό τηλεφώνου</div>`}
+      </div>
+    `;
+  }
+
+  function buildKteoMsg(v, c, kind) {
+    const s = state.settings;
+    const vLabel = [v.brand, v.model].filter(Boolean).join(' ') + (v.plate ? ` (${v.plate.toUpperCase()})` : '');
+    const name = c?.name || 'Αγαπητέ πελάτη';
+    if (kind === 'kteo') {
+      return `Αγαπητέ/ή ${name},\n\nΣας ενημερώνουμε ότι πλησιάζει η ημερομηνία ΚΤΕΟ για το ${vLabel}.\n\nΣυστήνουμε έλεγχο του οχήματος πριν την επίσκεψη στο ΚΤΕΟ για να εξασφαλίσετε επιτυχή διέλευση.\n\nΚαλέστε μας για ραντεβού.\n\n${[s.workshopName, s.workshopPhone].filter(Boolean).join('\n')}`.trim();
+    }
+    return `Αγαπητέ/ή ${name},\n\nΣας ενημερώνουμε ότι λήγει η κάρτα καυσαερίων για το ${vLabel}.\n\nΗ κάρτα καυσαερίων πρέπει να ανανεωθεί. Επικοινωνήστε μαζί μας.\n\n${[s.workshopName, s.workshopPhone].filter(Boolean).join('\n')}`.trim();
+  }
+
+  function openKteoReminderDialog(v, c, kind) {
+    const msg = buildKteoMsg(v, c, kind);
+    const label = kind === 'kteo' ? 'ΚΤΕΟ' : 'Κάρτα Καυσαερίων';
+    openDialog(`Υπενθύμιση ${label}`, `
+      <div class="space-y-3">
+        <textarea id="kteo-msg-text" rows="7" class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm">${U.escape(msg)}</textarea>
+        ${c?.phone ? `
+        <div class="grid grid-cols-3 gap-2">
+          <button id="kteo-send-wa" class="bg-green-500 hover:bg-green-600 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('message-circle','w-4 h-4')} WhatsApp</button>
+          <button id="kteo-send-sms" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('message-square','w-4 h-4')} SMS</button>
+          <button id="kteo-send-em" class="bg-slate-500 hover:bg-slate-600 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('mail','w-4 h-4')} Email</button>
+        </div>` : `<div class="text-xs italic text-slate-400">Χωρίς αριθμό τηλεφώνου</div>`}
+      </div>
+    `);
+    setTimeout(() => {
+      $('#kteo-send-wa')?.addEventListener('click', () => { window.open(U.whatsappLink(c.phone, $('#kteo-msg-text').value), '_blank'); });
+      $('#kteo-send-sms')?.addEventListener('click', () => { window.location.href = U.smsLink(c.phone, $('#kteo-msg-text').value); });
+      $('#kteo-send-em')?.addEventListener('click', () => {
+        if (!c?.email) { U.toast('Δεν υπάρχει email', 'error'); return; }
+        window.location.href = U.mailtoLink(c.email, `Υπενθύμιση ${label}`, $('#kteo-msg-text').value);
+      });
+    }, 50);
   }
 
   function reminderCard(r) {
@@ -1902,7 +2378,7 @@
           <div class="grid grid-cols-3 gap-2">
             <button data-reminder="${r.v.id}" class="bg-amber-500 hover:bg-amber-600 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('send','w-4 h-4')} ${t('send_reminder')}</button>
             <a target="_blank" href="${U.whatsappLink(c.phone, t('reminder_message_default', { customer: c.name, brand: r.v.brand||'', model: r.v.model||'', plate: r.v.plate||'' }))}" class="bg-green-500 hover:bg-green-600 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('message-circle','w-4 h-4')} WhatsApp</a>
-            <a href="${U.viberLink(c.phone, t('reminder_message_default', { customer: c.name, brand: r.v.brand||'', model: r.v.model||'', plate: r.v.plate||'' }))}" class="bg-purple-500 hover:bg-purple-600 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('phone','w-4 h-4')} Viber</a>
+            <a href="${U.smsLink(c.phone, t('reminder_message_default', { customer: c.name, brand: r.v.brand||'', model: r.v.model||'', plate: r.v.plate||'' }))}" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('message-square','w-4 h-4')} SMS</a>
           </div>
         ` : `<div class="text-xs italic text-slate-400 pt-1">${t('customer_phone')}: —</div>`}
       </div>
@@ -1910,14 +2386,31 @@
   }
 
   function openReminderDialog(v, c) {
-    if (!c) { U.toast(t('error_generic'), 'error'); return; }
+    if (!c) {
+      const msg = t('reminder_message_default', { customer: 'πελάτη', brand: v.brand||'', model: v.model||'', plate: v.plate||'' });
+      openDialog(t('send_reminder'), `
+        <div class="space-y-3">
+          <div class="px-3 py-2.5 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-sm text-amber-700 dark:text-amber-300 flex items-start gap-2">
+            ${icon('info','w-4 h-4 flex-shrink-0 mt-0.5')}
+            <span>Δεν υπάρχει συνδεδεμένος πελάτης. <a href="#/vehicles/${v.id}/edit" class="underline font-medium">Προσθέστε πελάτη</a> για αποστολή WhatsApp/SMS.</span>
+          </div>
+          <textarea id="msg-text" rows="5" class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm">${U.escape(msg)}</textarea>
+          <button id="send-copy" class="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('share-2','w-4 h-4')} Κοινοποίηση / Αντιγραφή</button>
+        </div>
+      `);
+      setTimeout(() => {
+        $('#send-copy').addEventListener('click', async () => {
+          await U.share(vehicleLabel(v), $('#msg-text').value);
+        });
+      }, 50);
+      return;
+    }
     const msg = t('reminder_message_default', { customer: c.name, brand: v.brand||'', model: v.model||'', plate: v.plate||'' });
     openDialog(t('send_reminder'), `
       <div class="space-y-3">
         <textarea id="msg-text" rows="5" class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">${U.escape(msg)}</textarea>
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <div class="grid grid-cols-3 gap-2">
           <button id="send-wa" class="bg-green-500 hover:bg-green-600 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('message-circle','w-4 h-4')} WhatsApp</button>
-          <button id="send-vi" class="bg-purple-500 hover:bg-purple-600 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('phone','w-4 h-4')} Viber</button>
           <button id="send-sms" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('message-square','w-4 h-4')} SMS</button>
           <button id="send-em" class="bg-slate-500 hover:bg-slate-600 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('mail','w-4 h-4')} Email</button>
         </div>
@@ -1926,9 +2419,6 @@
     setTimeout(() => {
       $('#send-wa').addEventListener('click', () => {
         window.open(U.whatsappLink(c.phone, $('#msg-text').value), '_blank');
-      });
-      $('#send-vi').addEventListener('click', () => {
-        window.location.href = U.viberLink(c.phone, $('#msg-text').value);
       });
       $('#send-sms').addEventListener('click', () => {
         window.location.href = U.smsLink(c.phone, $('#msg-text').value);
@@ -1953,20 +2443,20 @@
     openDialog(t('send_to_customer'), `
       <div class="space-y-3">
         <textarea id="msg-text" rows="8" class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">${U.escape(msg)}</textarea>
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
           ${c?.phone ? `
             <button id="send-wa" class="bg-green-500 hover:bg-green-600 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('message-circle','w-4 h-4')} WhatsApp</button>
-            <button id="send-vi" class="bg-purple-500 hover:bg-purple-600 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('phone','w-4 h-4')} Viber</button>
+            <button id="send-sms" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('message-square','w-4 h-4')} SMS</button>
           ` : ''}
           ${c?.email ? `<button id="send-em" class="bg-slate-500 hover:bg-slate-600 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('mail','w-4 h-4')} Email</button>` : ''}
-          <button id="send-copy" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('copy','w-4 h-4')} ${t('copy')}</button>
+          <button id="send-copy" class="bg-slate-600 hover:bg-slate-700 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('copy','w-4 h-4')} ${t('copy')}</button>
         </div>
       </div>
     `);
     setTimeout(() => {
       if (c?.phone) {
         $('#send-wa').addEventListener('click', () => window.open(U.whatsappLink(c.phone, $('#msg-text').value), '_blank'));
-        $('#send-vi').addEventListener('click', () => { window.location.href = U.viberLink(c.phone, $('#msg-text').value); });
+        $('#send-sms')?.addEventListener('click', () => { window.location.href = U.smsLink(c.phone, $('#msg-text').value); });
       }
       if (c?.email) $('#send-em').addEventListener('click', () => { window.location.href = U.mailtoLink(c.email, t('service'), $('#msg-text').value); });
       $('#send-copy').addEventListener('click', async () => {
@@ -1991,16 +2481,16 @@
         <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
           ${c?.phone ? `
             <button id="send-wa" class="bg-green-500 hover:bg-green-600 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('message-circle','w-4 h-4')} WhatsApp</button>
-            <button id="send-vi" class="bg-purple-500 hover:bg-purple-600 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('phone','w-4 h-4')} Viber</button>
+            <button id="send-sms" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('message-square','w-4 h-4')} SMS</button>
           ` : ''}
-          <button id="send-copy" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('copy','w-4 h-4')} ${t('copy')}</button>
+          <button id="send-copy" class="bg-slate-600 hover:bg-slate-700 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center justify-center gap-1">${icon('copy','w-4 h-4')} ${t('copy')}</button>
         </div>
       </div>
     `);
     setTimeout(() => {
       if (c?.phone) {
         $('#send-wa').addEventListener('click', () => window.open(U.whatsappLink(c.phone, $('#msg-text').value), '_blank'));
-        $('#send-vi').addEventListener('click', () => { window.location.href = U.viberLink(c.phone, $('#msg-text').value); });
+        $('#send-sms')?.addEventListener('click', () => { window.location.href = U.smsLink(c.phone, $('#msg-text').value); });
       }
       $('#send-copy').addEventListener('click', async () => {
         try { await navigator.clipboard.writeText($('#msg-text').value); U.toast(t('copied')); } catch (e) {}
@@ -2182,6 +2672,12 @@
       // Mutable copy so edits persist between re-renders
       let scanData = { ...data };
 
+      // Plate mismatch check. Consume-once, read here (not inside renderResult, which reruns
+      // on every edit) so a stale "not found" search from an earlier, abandoned flow can't
+      // leak into a later, unrelated scan and trigger a false mismatch warning.
+      const expectedPlate = sessionStorage.getItem('scan_expected_plate') || '';
+      sessionStorage.removeItem('scan_expected_plate');
+
       function applyAndGo(includeOwner) {
         const payload = { ...scanData, regPhoto: photos[0] };
         sessionStorage.setItem('ai_scan_result', JSON.stringify(payload));
@@ -2205,6 +2701,10 @@
 
       function renderResult() {
         const d = scanData;
+
+        const scannedNorm = normPlate(d.plate || '');
+        const plateMismatch = expectedPlate && scannedNorm && scannedNorm !== expectedPlate;
+
         const ownerBlock = d.ownerName ? `
           <div class="col-span-2 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 rounded-lg p-3 flex items-center gap-2">
             ${icon('user','w-4 h-4 text-indigo-500 flex-shrink-0')}
@@ -2222,6 +2722,14 @@
                 ${icon('pencil','w-3.5 h-3.5')} Επεξεργασία
               </button>
             </div>
+            ${plateMismatch ? `
+              <div class="flex items-start gap-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-3">
+                ${icon('alert-triangle','w-5 h-5 text-red-500 flex-shrink-0 mt-0.5')}
+                <div>
+                  <div class="text-sm font-semibold text-red-700 dark:text-red-400">Ασυμφωνία πινακίδας</div>
+                  <div class="text-xs text-red-600 dark:text-red-300 mt-0.5">Αναζήτησες <b>${U.escape(expectedPlate)}</b> αλλά η άδεια έχει <b>${U.escape(scannedNorm || '—')}</b>. Επαλήθευσε ότι φωτογράφισες τη σωστή άδεια.</div>
+                </div>
+              </div>` : ''}
             <div class="grid grid-cols-2 gap-3 text-sm">
               ${ownerBlock}
               ${kv('Αριθμός Κυκλοφορίας', d.plate)}
@@ -2492,6 +3000,7 @@
             <label class="block text-sm font-medium mb-1">${t('jo_est_hours')}</label>
             <input type="number" id="jo-hours" min="0.5" max="24" step="0.5" value="${jo.estimatedHours || 2}" class="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800" />
           </div>
+          ${mechanicSelect('jo-mechanic', jo.mechanic)}
         </div>
 
         <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4">
@@ -2560,6 +3069,7 @@
         tasks: allTasks,
         desiredDelivery: $('#jo-delivery').value || null,
         estimatedHours: parseFloat($('#jo-hours').value) || 2,
+        mechanic: ($('[name="jo-mechanic"]')?.value || '').trim() || null,
         notes: $('#jo-notes').value.trim(),
         status: jo.status || 'pending',
         completedTasks: jo.completedTasks || {},
@@ -2603,6 +3113,7 @@
             ${kv(t('vehicle_plate'), v?.plate)}
             ${kv(t('customer'), c ? `<a class="text-blue-700 dark:text-blue-500" href="#/customers/${c.id}">${U.escape(c.name)}</a>` : '—')}
             ${kv(t('customer_phone'), c?.phone ? `<a href="tel:${U.escape(c.phone)}" class="text-blue-700 dark:text-blue-500">${U.escape(c.phone)}</a>` : '—')}
+            ${jo.mechanic ? kv(t('service_mechanic'), jo.mechanic) : ''}
           </div>
         </div>
 
@@ -2726,6 +3237,39 @@
             </div>`).join('')}
           </div>
 
+          <!-- ===== Parts & Cost Panel ===== -->
+          <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+            <div class="px-4 py-3 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between">
+              <h2 class="font-semibold text-sm flex items-center gap-2">${icon('package','w-4 h-4 text-slate-400')} Ανταλλακτικά & Κόστος</h2>
+              <label class="flex items-center gap-1.5 cursor-pointer select-none">
+                <input type="checkbox" id="show-cost-report" ${jo.showCostOnReport !== false ? 'checked' : ''} class="w-3.5 h-3.5 accent-blue-600" />
+                <span class="text-xs text-slate-500 dark:text-slate-400">Εμφάνιση στην αναφορά</span>
+              </label>
+            </div>
+            <div class="p-4 space-y-3">
+              <div id="parts-list" class="space-y-2">
+                ${(jo.workParts || []).length === 0
+                  ? '<p class="text-xs text-slate-400 text-center py-1">Δεν έχουν προστεθεί ανταλλακτικά ακόμα</p>'
+                  : (jo.workParts || []).map((p, i) => renderPartRow(p, i)).join('')}
+              </div>
+              <button id="add-part-btn" class="w-full border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl py-2.5 text-sm text-slate-500 hover:border-blue-400 dark:hover:border-blue-600 hover:text-blue-600 dark:hover:text-blue-400 flex items-center justify-center gap-1.5 transition-colors">
+                ${icon('plus-circle','w-4 h-4')} Προσθήκη ανταλλακτικού
+              </button>
+              <div class="flex items-center gap-3 pt-2 border-t border-slate-100 dark:border-slate-700">
+                <label class="text-sm font-medium whitespace-nowrap flex-shrink-0">Κόστος εργασίας</label>
+                <div class="relative flex-1">
+                  <input type="number" id="labor-cost-input" value="${jo.laborCost || ''}" placeholder="0.00" min="0" step="0.01"
+                    class="w-full pl-3 pr-8 py-2 text-sm text-right rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <span class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none">€</span>
+                </div>
+              </div>
+              <div class="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-900/40 rounded-xl px-4 py-3 flex items-center justify-between">
+                <span class="text-sm font-semibold text-emerald-800 dark:text-emerald-300">Συνολικό κόστος εργασίας</span>
+                <span id="total-cost-val" class="text-xl font-bold text-emerald-700 dark:text-emerald-400">€${calcTotalCost(jo)}</span>
+              </div>
+            </div>
+          </div>
+
           <button id="complete-jo" ${allDone ? '' : 'disabled'} class="${allDone ? 'bg-emerald-500 hover:bg-emerald-600 cursor-pointer text-white' : 'bg-slate-200 dark:bg-slate-700 cursor-not-allowed opacity-60 text-slate-500'} font-medium py-3 rounded-xl w-full flex items-center justify-center gap-2">
             ${icon('check-circle','w-5 h-5')} ${t('jo_complete')}
           </button>
@@ -2778,7 +3322,7 @@
       const rawMethods = c?.contactMethods;
       const methods = rawMethods
         ? (Array.isArray(rawMethods) ? rawMethods : JSON.parse(rawMethods || '[]'))
-        : (c?.preferredContact ? [c.preferredContact] : ['whatsapp', 'viber', 'sms']);
+        : (c?.preferredContact ? [c.preferredContact] : ['whatsapp', 'sms']);
       const ws = state.settings;
 
       const completedLabels = (jo.tasks || [])
@@ -2832,15 +3376,15 @@
                 <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.123.555 4.116 1.529 5.843L0 24l6.306-1.505A11.945 11.945 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 22c-1.886 0-3.655-.493-5.193-1.357l-.371-.22-3.747.895.93-3.65-.24-.385A9.96 9.96 0 012 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10z"/></svg>
                 WhatsApp
               </a>`,
-              viber: viberLink ? `<a href="${viberLink}" class="flex items-center justify-center gap-2 bg-violet-600 hover:bg-violet-700 text-white font-medium py-2.5 rounded-xl text-sm transition-colors">
-                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M11.4 0C5.2.4.6 5.2.6 11.4c0 2.2.6 4.3 1.8 6.1l-1.2 4.4 4.5-1.2c1.7 1 3.7 1.6 5.7 1.6 6.2 0 11-4.8 11.4-11C23 4.8 17.8-.4 11.4 0zm5.7 15.6c-.2.6-.9 1.1-1.6 1.2-.4.1-.9.1-1.4 0-2.7-.7-4.9-2.5-6.4-4.9-.8-1.3-1.3-2.7-1.4-4.2 0-.7.2-1.4.7-1.9.3-.3.6-.5.9-.5h.8c.3 0 .5.2.7.5l1 2.2c.1.3 0 .6-.2.8l-.6.7c-.1.2-.1.4 0 .6.5 1 1.3 1.9 2.3 2.5.2.1.4.1.6 0l.7-.7c.2-.2.5-.3.8-.2l2.2 1c.3.2.5.4.5.7v.8c0 .2-.1.3-.2.4h-.4z"/></svg>
-                Viber
-              </a>` : '',
-              sms: phone ? `<a href="sms:${c?.phone}&body=${encodedMsg}" class="flex items-center justify-center gap-2 bg-slate-600 hover:bg-slate-700 text-white font-medium py-2.5 rounded-xl text-sm transition-colors">
-                ${icon('message-circle','w-5 h-5')} SMS
+              sms: phone ? `<a href="${U.smsLink(c?.phone, decodeURIComponent(encodedMsg))}" class="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 rounded-xl text-sm transition-colors">
+                ${icon('message-square','w-5 h-5')} SMS
               </a>` : '',
             };
-            const btns = methods.map((k) => contactButtons[k] || '').filter(Boolean);
+            let btns = methods.map((k) => contactButtons[k] || '').filter(Boolean);
+            // A customer's only saved preference might be a channel we no longer support
+            // (e.g. legacy 'viber'). Don't leave them with zero contact buttons — fall back
+            // to WhatsApp, which works for any phone number with no extra setup.
+            if (!btns.length) btns = [contactButtons.whatsapp];
             const cols = btns.length === 1 ? 'grid-cols-1' : btns.length === 2 ? 'grid-cols-2' : 'grid-cols-3';
             return `<div class="grid ${cols} gap-2">${btns.join('')}</div>`;
           })()}
@@ -2866,6 +3410,150 @@
         overlay.remove();
         go('/job-orders/' + id);
       });
+    }
+
+    const PART_PRESETS = [
+      { cat: 'Λιπαντικά',  items: ['Λάδι κινητήρα', 'Λάδι κιβωτίου', 'Λάδι διαφορικού', 'Υγρό φρένων', 'Υγρό ψυγείου', 'Υγρό υαλοκαθαριστήρων'] },
+      { cat: 'Φίλτρα',     items: ['Φίλτρο λαδιού', 'Φίλτρο αέρα', 'Φίλτρο καυσίμου', 'Φίλτρο καμπίνας'] },
+      { cat: 'Φρένα',      items: ['Τακάκια εμπρός', 'Τακάκια πίσω', 'Δίσκοι εμπρός', 'Δίσκοι πίσω', 'Τύμπανα'] },
+      { cat: 'Ανάφλεξη',  items: ['Μπουζί', 'Πλατίνες', 'Μπεκ', 'Καλώδια μπουζί', 'Μονάδα ανάφλεξης'] },
+      { cat: 'Κινητήρας', items: ['Ιμάντας χρονισμού', 'Ιμάντας βοηθητικός', 'Τεντωτήρας', 'Αντλία νερού', 'Ψυγείο νερού'] },
+      { cat: 'Λοιπά',      items: ['Μπαταρία', 'Λάμπα εμπρός', 'Λάμπα πίσω', 'Τεντωτήρας ιμάντα', 'Ψυγείο A/C'] },
+    ];
+
+    function renderPartRow(p, i) {
+      const total = ((Number(p.qty) || 0) * (Number(p.price) || 0)).toFixed(2);
+      return `
+        <div class="flex items-center gap-2 bg-slate-50 dark:bg-slate-700/50 rounded-lg px-3 py-2 part-row" data-idx="${i}">
+          <span class="flex-1 text-sm truncate font-medium text-slate-700 dark:text-slate-200">${U.escape(p.name)}</span>
+          <input type="number" value="${p.qty || 1}" min="0.01" step="0.01"
+            class="part-qty w-16 text-center text-sm px-1 py-1 rounded border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            data-idx="${i}" placeholder="Ποσ." />
+          <input type="number" value="${p.price || ''}" min="0" step="0.01"
+            class="part-price w-20 text-right text-sm px-1 py-1 rounded border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            data-idx="${i}" placeholder="€" />
+          <span class="part-line-total text-xs font-semibold text-emerald-700 dark:text-emerald-400 w-16 text-right">€${total}</span>
+          <button class="part-del flex-shrink-0 text-slate-400 hover:text-red-500 transition-colors" data-idx="${i}">${icon('trash-2','w-4 h-4')}</button>
+        </div>`;
+    }
+
+    function calcTotalCost(j) {
+      const parts = (j.workParts || []).reduce((s, p) => s + (Number(p.qty) || 0) * (Number(p.price) || 0), 0);
+      return (parts + (Number(j.laborCost) || 0)).toFixed(2);
+    }
+
+    function updateTotal() {
+      const el = document.getElementById('total-cost-val');
+      if (el) el.textContent = '€' + calcTotalCost(jo);
+    }
+
+    async function savePartsAndRefresh() {
+      jo = await DB.add('job_orders', jo);
+      state.jobOrders = await DB.getAll('job_orders');
+      jo = jobOrderById(id);
+      const list = document.getElementById('parts-list');
+      if (list) {
+        list.innerHTML = (jo.workParts || []).length === 0
+          ? '<p class="text-xs text-slate-400 text-center py-1">Δεν έχουν προστεθεί ανταλλακτικά ακόμα</p>'
+          : (jo.workParts || []).map((p, i) => renderPartRow(p, i)).join('');
+        refreshIcons();
+      }
+      updateTotal();
+      wirePartsHandlers();
+    }
+
+    function wirePartsHandlers() {
+      $$('.part-qty').forEach((inp) => {
+        inp.addEventListener('change', () => {
+          const i = Number(inp.dataset.idx);
+          if (!jo.workParts?.[i]) return;
+          jo.workParts[i].qty = Number(inp.value) || 0;
+          const row = inp.closest('.part-row');
+          const lineEl = row?.querySelector('.part-line-total');
+          if (lineEl) lineEl.textContent = '€' + ((jo.workParts[i].qty) * (Number(jo.workParts[i].price) || 0)).toFixed(2);
+          updateTotal();
+          DB.add('job_orders', jo);
+        });
+      });
+      $$('.part-price').forEach((inp) => {
+        inp.addEventListener('change', () => {
+          const i = Number(inp.dataset.idx);
+          if (!jo.workParts?.[i]) return;
+          jo.workParts[i].price = Number(inp.value) || 0;
+          const row = inp.closest('.part-row');
+          const lineEl = row?.querySelector('.part-line-total');
+          if (lineEl) lineEl.textContent = '€' + ((Number(jo.workParts[i].qty) || 0) * jo.workParts[i].price).toFixed(2);
+          updateTotal();
+          DB.add('job_orders', jo);
+        });
+      });
+      $$('.part-del').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const i = Number(btn.dataset.idx);
+          if (jo.workParts) jo.workParts.splice(i, 1);
+          await savePartsAndRefresh();
+        });
+      });
+    }
+
+    function showPartPicker() {
+      const overlay = document.createElement('div');
+      overlay.className = 'fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-4';
+      overlay.innerHTML = `
+        <div class="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-sm shadow-2xl p-5 space-y-4 max-h-[80vh] flex flex-col">
+          <div class="flex items-center justify-between flex-shrink-0">
+            <h3 class="font-bold text-base">Επιλογή ανταλλακτικού</h3>
+            <button id="pp-close" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">${icon('x','w-5 h-5')}</button>
+          </div>
+          <div class="overflow-y-auto flex-1 space-y-3 pr-1">
+            ${PART_PRESETS.map((cat) => `
+              <div>
+                <div class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">${cat.cat}</div>
+                <div class="grid grid-cols-2 gap-1.5">
+                  ${cat.items.map((item) => `
+                    <button class="pp-preset text-left text-sm px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700
+                      hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
+                      data-name="${U.escape(item)}">${U.escape(item)}</button>
+                  `).join('')}
+                </div>
+              </div>
+            `).join('')}
+            <div>
+              <div class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Άλλο (προσαρμοσμένο)</div>
+              <div class="flex gap-2">
+                <input id="pp-custom" type="text" placeholder="Όνομα ανταλλακτικού…"
+                  class="flex-1 text-sm px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <button id="pp-custom-add" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-2 rounded-lg flex-shrink-0">Προσθήκη</button>
+              </div>
+            </div>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      refreshIcons();
+
+      overlay.querySelector('#pp-close').addEventListener('click', () => overlay.remove());
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+      overlay.querySelectorAll('.pp-preset').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          overlay.remove();
+          if (!jo.workParts) jo.workParts = [];
+          jo.workParts.push({ name: btn.dataset.name, qty: 1, price: 0 });
+          await savePartsAndRefresh();
+        });
+      });
+
+      const customInp = overlay.querySelector('#pp-custom');
+      const addCustom = async () => {
+        const name = customInp.value.trim();
+        if (!name) { customInp.focus(); return; }
+        overlay.remove();
+        if (!jo.workParts) jo.workParts = [];
+        jo.workParts.push({ name, qty: 1, price: 0 });
+        await savePartsAndRefresh();
+      };
+      overlay.querySelector('#pp-custom-add').addEventListener('click', addCustom);
+      customInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') addCustom(); });
     }
 
     $('#view').innerHTML = buildHTML();
@@ -2914,6 +3602,25 @@
     // Complete button
     const completeBtn = $('#complete-jo');
     if (completeBtn && !completeBtn.disabled) completeBtn.addEventListener('click', completeJob);
+
+    // Parts panel
+    $('#add-part-btn')?.addEventListener('click', showPartPicker);
+    wirePartsHandlers();
+
+    $('#show-cost-report')?.addEventListener('change', async (e) => {
+      jo.showCostOnReport = e.target.checked;
+      jo = await DB.add('job_orders', jo);
+      state.jobOrders = await DB.getAll('job_orders');
+      jo = jobOrderById(id);
+    });
+
+    $('#labor-cost-input')?.addEventListener('change', async (e) => {
+      jo.laborCost = Number(e.target.value) || 0;
+      jo = await DB.add('job_orders', jo);
+      state.jobOrders = await DB.getAll('job_orders');
+      jo = jobOrderById(id);
+      updateTotal();
+    });
   }
 
   async function renderSchedule() {
@@ -3177,6 +3884,178 @@
     return resp.json();
   }
 
+  // ---- Service HTML PDF (same style as job order PDF) ----
+  async function serviceHtmlPdf(svc, v, c) {
+    if (!window.jspdf?.jsPDF || !window.html2canvas) {
+      U.toast(t('error_generic'), 'error');
+      return;
+    }
+    const { jsPDF } = window.jspdf;
+    const s = state.settings;
+    const isEl = (localStorage.getItem('lang') || 'el') === 'el';
+
+    const modelPart = v ? `${v.brand || ''}_${v.model || ''}`.trim().replace(/[\s/\\]+/g, '_') : 'vehicle';
+    const datePart = (svc.date || '').slice(0, 10).replace(/-/g, '-');
+    const filename = ['service', modelPart, datePart].filter(Boolean).join('_') + '.pdf';
+
+    // Parts table rows
+    const partsTotal = (svc.parts || []).reduce((sum, p) => sum + (Number(p.qty)||0)*(Number(p.price)||0), 0);
+    const pdfLaborRate = svc.laborRate != null ? (Number(svc.laborRate) || 0) : (Number(s.laborRate) || 0);
+    const laborTotal = (Number(svc.laborHours)||0) * pdfLaborRate;
+    const grandTotal = partsTotal + laborTotal;
+
+    const partsRows = (svc.parts && svc.parts.length) ? svc.parts.map((p, i) => {
+      const tot = (Number(p.qty)||0)*(Number(p.price)||0);
+      return `<div style="display:grid;grid-template-columns:1.5fr 0.6fr 0.6fr 0.7fr 0.7fr;gap:4px;padding:5px 8px;border-bottom:1px solid #f1f5f9;font-size:11px;">
+        <div>${U.escape(p.name||'')}</div>
+        <div style="color:#64748b;">${U.escape(p.code||'')}</div>
+        <div style="text-align:center;">${p.qty||0}</div>
+        <div style="text-align:right;">${U.fmtMoney(p.price)}</div>
+        <div style="text-align:right;font-weight:600;">${U.fmtMoney(tot)}</div>
+      </div>`;
+    }).join('') : '';
+
+    const checklistRows = (svc.checklist && svc.checklist.length) ? svc.checklist.map((key) =>
+      `<div style="display:flex;align-items:center;gap:7px;padding:4px 8px;border-bottom:1px solid #f1f5f9;">
+        <span style="font-size:14px;color:#10b981;">✓</span>
+        <span style="font-size:11.5px;">${U.escape(key.startsWith('custom:') ? key.slice(7) : t('task_' + key))}</span>
+      </div>`
+    ).join('') : '';
+
+    // Next service
+    const nextSvcKm = svc.nextServiceMileage || (v?.mileage ? Number(v.mileage) + Number(s.intervalKm||10000) : null);
+    const nextSvcDate = svc.nextServiceDate
+      ? new Date(svc.nextServiceDate)
+      : U.addMonths(svc.date || new Date(), Number(s.intervalMonths||12));
+
+    const html = `
+      <div style="font-family:'Segoe UI',Arial,Helvetica,'DejaVu Sans',sans-serif;color:#1e293b;background:white;width:794px;padding:36px 40px;box-sizing:border-box;">
+
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;">
+          <div>
+            <div style="font-size:20px;font-weight:800;color:#f97316;">${U.escape(s.workshopName || 'GearLog')}</div>
+            ${s.workshopAddress ? `<div style="font-size:10.5px;color:#64748b;margin-top:2px;">${U.escape(s.workshopAddress)}</div>` : ''}
+          </div>
+          <div style="text-align:right;">
+            ${s.workshopPhone ? `<div style="font-size:12px;font-weight:600;">${U.escape(s.workshopPhone)}</div>` : ''}
+            ${s.workshopEmail ? `<div style="font-size:10.5px;color:#64748b;">${U.escape(s.workshopEmail)}</div>` : ''}
+            <div style="font-size:10px;color:#94a3b8;margin-top:2px;">${U.fmtDate(new Date())}</div>
+          </div>
+        </div>
+
+        <div style="border-top:3px solid #f97316;margin-bottom:18px;"></div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+          <div style="font-size:16px;font-weight:700;letter-spacing:0.5px;">${isEl ? 'ΔΕΛΤΙΟ SERVICE' : 'SERVICE RECORD'}</div>
+          <div style="text-align:right;">
+            <div style="font-size:10px;color:#94a3b8;">${U.fmtDate(svc.date)}</div>
+            ${svc.mechanic ? `<div style="font-size:10px;color:#94a3b8;">${isEl ? 'Μηχανικός' : 'Mechanic'}: ${U.escape(svc.mechanic)}</div>` : ''}
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px;">
+          <div style="background:#f8fafc;border-radius:8px;padding:12px;">
+            <div style="font-size:9.5px;font-weight:700;color:#f97316;letter-spacing:1px;margin-bottom:8px;">${isEl ? 'ΟΧΗΜΑ' : 'VEHICLE'}</div>
+            ${v ? `
+              <div style="font-size:13.5px;font-weight:700;">${U.escape(v.brand||'')} ${U.escape(v.model||'')}</div>
+              ${v.year ? `<div style="font-size:11px;color:#64748b;margin-top:2px;">${v.year}</div>` : ''}
+              ${v.plate ? `<div style="font-size:11px;color:#475569;margin-top:2px;">${isEl?'Πινακίδα':'Plate'}: <b>${U.escape(v.plate)}</b></div>` : ''}
+              ${v.vin ? `<div style="font-size:9.5px;color:#94a3b8;margin-top:2px;">VIN: ${U.escape(v.vin)}</div>` : ''}
+              ${svc.mileage ? `<div style="font-size:12px;font-weight:700;color:#f97316;margin-top:5px;">${Number(svc.mileage).toLocaleString('el-GR')} km</div>` : ''}
+            ` : '<div style="font-size:12px;color:#94a3b8;">—</div>'}
+          </div>
+          <div style="background:#f8fafc;border-radius:8px;padding:12px;">
+            <div style="font-size:9.5px;font-weight:700;color:#64748b;letter-spacing:1px;margin-bottom:8px;">${isEl ? 'ΠΕΛΑΤΗΣ' : 'CUSTOMER'}</div>
+            ${c ? `
+              <div style="font-size:13.5px;font-weight:700;">${U.escape(c.name)}</div>
+              ${c.phone ? `<div style="font-size:11px;color:#64748b;margin-top:4px;">${isEl?'Τηλ':'Tel'}: ${U.escape(c.phone)}</div>` : ''}
+              ${c.email ? `<div style="font-size:9.5px;color:#94a3b8;margin-top:2px;">${U.escape(c.email)}</div>` : ''}
+            ` : '<div style="font-size:12px;color:#94a3b8;">—</div>'}
+          </div>
+        </div>
+
+        ${checklistRows ? `
+        <div style="margin-bottom:20px;">
+          <div style="font-size:9.5px;font-weight:700;color:#64748b;letter-spacing:1px;padding-bottom:5px;border-bottom:2px solid #e2e8f0;margin-bottom:4px;">${isEl ? 'ΕΡΓΑΣΙΕΣ' : 'TASKS'}</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;">${checklistRows}</div>
+        </div>` : ''}
+
+        ${svc.description ? `
+        <div style="margin-bottom:20px;">
+          <div style="font-size:9.5px;font-weight:700;color:#64748b;letter-spacing:1px;padding-bottom:5px;border-bottom:2px solid #e2e8f0;margin-bottom:8px;">${isEl ? 'ΠΕΡΙΓΡΑΦΗ' : 'DESCRIPTION'}</div>
+          <div style="font-size:11.5px;color:#374151;line-height:1.6;">${U.escape(svc.description).replace(/\n/g,'<br>')}</div>
+        </div>` : ''}
+
+        ${partsRows ? `
+        <div style="margin-bottom:16px;">
+          <div style="font-size:9.5px;font-weight:700;color:#64748b;letter-spacing:1px;padding-bottom:5px;border-bottom:2px solid #e2e8f0;margin-bottom:4px;">${isEl ? 'ΑΝΤΑΛΛΑΚΤΙΚΑ' : 'PARTS'}</div>
+          <div style="display:grid;grid-template-columns:1.5fr 0.6fr 0.6fr 0.7fr 0.7fr;gap:4px;padding:5px 8px;background:#f8fafc;font-size:10px;font-weight:700;color:#64748b;">
+            <div>${isEl?'Είδος':'Part'}</div><div>${isEl?'Κωδικός':'Code'}</div><div style="text-align:center;">${isEl?'Ποσ.':'Qty'}</div><div style="text-align:right;">${isEl?'Τιμή':'Price'}</div><div style="text-align:right;">${isEl?'Σύνολο':'Total'}</div>
+          </div>
+          ${partsRows}
+        </div>` : ''}
+
+        ${grandTotal > 0 ? `
+        <div style="display:flex;flex-direction:column;align-items:flex-end;margin-bottom:20px;gap:4px;">
+          ${partsTotal > 0 ? `<div style="font-size:11px;color:#64748b;">${isEl?'Ανταλλακτικά':'Parts'}: ${U.fmtMoney(partsTotal)}</div>` : ''}
+          ${laborTotal > 0 ? `<div style="font-size:11px;color:#64748b;">${isEl?'Εργατικά':'Labour'} (${svc.laborHours||0}h): ${U.fmtMoney(laborTotal)}</div>` : ''}
+          <div style="font-size:15px;font-weight:800;color:#1e293b;border-top:2px solid #e2e8f0;padding-top:6px;margin-top:2px;">${isEl?'ΣΥΝΟΛΟ':'TOTAL'}: ${U.fmtMoney(grandTotal)}</div>
+        </div>` : ''}
+
+        <div style="background:#fffbeb;border:1.5px solid #fcd34d;border-radius:8px;padding:12px 16px;margin-bottom:20px;">
+          <div style="font-size:9.5px;font-weight:700;color:#92400e;letter-spacing:1px;margin-bottom:8px;">${isEl ? 'ΕΠΟΜΕΝΟ SERVICE' : 'NEXT SERVICE'}</div>
+          <div style="display:flex;gap:24px;">
+            ${nextSvcKm ? `<div style="font-size:11.5px;"><span style="color:#64748b;">${isEl?'Χιλιόμετρα':'Mileage'}:</span> <b style="color:#1e293b;">${Number(nextSvcKm).toLocaleString('el-GR')} km</b></div>` : ''}
+            <div style="font-size:11.5px;"><span style="color:#64748b;">${isEl?'Ημερομηνία':'Date'}:</span> <b style="color:#1e293b;">${U.fmtDate(nextSvcDate)}</b></div>
+          </div>
+        </div>
+
+        ${svc.notes ? `
+        <div style="margin-bottom:20px;">
+          <div style="font-size:9.5px;font-weight:700;color:#64748b;letter-spacing:1px;padding-bottom:5px;border-bottom:2px solid #e2e8f0;margin-bottom:8px;">${isEl ? 'ΣΗΜΕΙΩΣΕΙΣ' : 'NOTES'}</div>
+          <div style="font-size:11.5px;color:#374151;line-height:1.6;background:#fffbeb;border-left:3px solid #f59e0b;padding:10px 12px;border-radius:4px;">${U.escape(svc.notes).replace(/\n/g,'<br>')}</div>
+        </div>` : ''}
+
+        <div style="margin-top:28px;border-top:1px solid #e2e8f0;padding-top:8px;display:flex;justify-content:space-between;align-items:center;">
+          <div style="font-size:9px;color:#94a3b8;">${U.escape(s.workshopName || 'GearLog')}</div>
+          <div style="font-size:9px;color:#94a3b8;">${U.fmtDate(new Date())}</div>
+        </div>
+      </div>
+    `;
+
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = 'position:fixed;left:-9999px;top:0;z-index:-9999;';
+    wrapper.innerHTML = html;
+    document.body.appendChild(wrapper);
+
+    try {
+      const el = wrapper.firstElementChild;
+      const canvas = await window.html2canvas(el, { scale: 2, useCORS: true, logging: false, backgroundColor: '#ffffff' });
+      const imgData = canvas.toDataURL('image/jpeg', 0.93);
+      const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+      const imgH = (canvas.height / canvas.width) * pageW;
+
+      let pos = 0;
+      doc.addImage(imgData, 'JPEG', 0, pos, pageW, imgH);
+      let remaining = imgH - pageH;
+      while (remaining > 0) {
+        pos -= pageH;
+        doc.addPage();
+        doc.addImage(imgData, 'JPEG', 0, pos, pageW, imgH);
+        remaining -= pageH;
+      }
+
+      doc.save(filename);
+    } catch (e) {
+      console.error('Service PDF error:', e);
+      U.toast(t('error_generic'), 'error');
+    } finally {
+      document.body.removeChild(wrapper);
+    }
+  }
+
   // ---- Job Order PDF export ----
   async function jobOrderPdf(jo) {
     if (!window.jspdf?.jsPDF || !window.html2canvas) {
@@ -3194,6 +4073,11 @@
     const mileagePart = v?.mileage ? `${Number(v.mileage).toLocaleString('el-GR')}km` : '';
     const datePart = U.fmtDate(jo.completedAt || jo.createdAt).replace(/\//g, '-');
     const filename = ['service', modelPart, mileagePart, datePart].filter(Boolean).join('_') + '.pdf';
+
+    // Next service calculation
+    const baseDate = jo.completedAt ? new Date(jo.completedAt) : new Date();
+    const nextSvcDate = U.addMonths(baseDate, Number(s.intervalMonths || 12));
+    const nextSvcKm = v?.mileage ? (Number(v.mileage) + Number(s.intervalKm || 10000)) : null;
 
     const taskRows = (jo.tasks || []).map((key) => {
       const done = jo.completedTasks?.[key];
@@ -3227,6 +4111,7 @@
           </div>
           <div style="text-align:right;">
             ${s.workshopPhone ? `<div style="font-size:12px;font-weight:600;">${U.escape(s.workshopPhone)}</div>` : ''}
+            ${s.workshopEmail ? `<div style="font-size:10.5px;color:#64748b;">${U.escape(s.workshopEmail)}</div>` : ''}
             <div style="font-size:10px;color:#94a3b8;margin-top:2px;">${U.fmtDate(new Date())}</div>
           </div>
         </div>
@@ -3264,6 +4149,7 @@
 
           <div style="background:#f8fafc;border-radius:8px;padding:12px;">
             <div style="font-size:9.5px;font-weight:700;color:#64748b;letter-spacing:1px;margin-bottom:8px;">${isEl ? 'ΧΡΟΝΟΔΙΑΓΡΑΜΜΑ' : 'SCHEDULE'}</div>
+            ${jo.mechanic ? `<div style="font-size:10.5px;color:#475569;margin-bottom:3px;"><b>${isEl ? 'Μηχανικός' : 'Mechanic'}:</b> ${U.escape(jo.mechanic)}</div>` : ''}
             ${jo.desiredDelivery ? `<div style="font-size:10.5px;color:#475569;margin-bottom:3px;"><b>${isEl ? 'Παράδοση' : 'Delivery'}:</b> ${U.fmtDatetime(jo.desiredDelivery)}</div>` : ''}
             ${jo.estimatedHours ? `<div style="font-size:10.5px;color:#475569;margin-bottom:3px;"><b>${isEl ? 'Εκτ. ώρες' : 'Est. hours'}:</b> ${jo.estimatedHours}h</div>` : ''}
             ${jo.startedAt ? `<div style="font-size:10.5px;color:#475569;margin-bottom:3px;"><b>${isEl ? 'Έναρξη' : 'Start'}:</b> ${U.fmtDatetime(jo.startedAt)}</div>` : ''}
@@ -3284,11 +4170,58 @@
         </div>
 
         ${jo.notes ? `
-        <div>
+        <div style="margin-bottom:20px;">
           <div style="font-size:9.5px;font-weight:700;color:#64748b;letter-spacing:1px;padding-bottom:5px;border-bottom:2px solid #e2e8f0;margin-bottom:8px;">${isEl ? 'ΣΗΜΕΙΩΣΕΙΣ' : 'NOTES'}</div>
           <div style="font-size:11.5px;color:#374151;line-height:1.6;background:#fffbeb;border-left:3px solid #f59e0b;padding:10px 12px;border-radius:4px;">${U.escape(jo.notes).replace(/\n/g, '<br>')}</div>
         </div>
         ` : ''}
+
+        ${jo.showCostOnReport !== false && ((jo.workParts || []).length > 0 || jo.laborCost) ? `
+        <div style="margin-bottom:20px;">
+          <div style="font-size:9.5px;font-weight:700;color:#64748b;letter-spacing:1px;padding-bottom:5px;border-bottom:2px solid #e2e8f0;margin-bottom:8px;">ΑΝΤΑΛΛΑΚΤΙΚΑ &amp; ΚΟΣΤΟΣ</div>
+          <table style="width:100%;border-collapse:collapse;font-size:11px;">
+            <thead>
+              <tr style="background:#f8fafc;">
+                <th style="text-align:left;padding:5px 8px;color:#64748b;font-weight:600;">Ανταλλακτικό</th>
+                <th style="text-align:center;padding:5px 8px;color:#64748b;font-weight:600;width:60px;">Ποσ.</th>
+                <th style="text-align:right;padding:5px 8px;color:#64748b;font-weight:600;width:70px;">Τιμή</th>
+                <th style="text-align:right;padding:5px 8px;color:#64748b;font-weight:600;width:70px;">Σύνολο</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${(jo.workParts || []).map((p) => {
+                const lt = ((Number(p.qty)||0)*(Number(p.price)||0)).toFixed(2);
+                return `<tr style="border-bottom:1px solid #f1f5f9;">
+                  <td style="padding:5px 8px;">${U.escape(p.name)}</td>
+                  <td style="text-align:center;padding:5px 8px;">${Number(p.qty)||0}</td>
+                  <td style="text-align:right;padding:5px 8px;">€${Number(p.price||0).toFixed(2)}</td>
+                  <td style="text-align:right;padding:5px 8px;font-weight:600;">€${lt}</td>
+                </tr>`;
+              }).join('')}
+              ${jo.laborCost ? `<tr style="border-bottom:1px solid #f1f5f9;background:#f8fafc;">
+                <td colspan="3" style="padding:5px 8px;font-style:italic;color:#475569;">Κόστος εργασίας</td>
+                <td style="text-align:right;padding:5px 8px;font-weight:600;">€${Number(jo.laborCost).toFixed(2)}</td>
+              </tr>` : ''}
+            </tbody>
+          </table>
+          <div style="display:flex;justify-content:flex-end;margin-top:8px;">
+            <div style="background:#d1fae5;border:1.5px solid #6ee7b7;border-radius:8px;padding:8px 16px;text-align:right;">
+              <div style="font-size:9.5px;color:#065f46;font-weight:700;letter-spacing:0.5px;margin-bottom:2px;">ΣΥΝΟΛΙΚΟ ΚΟΣΤΟΣ</div>
+              <div style="font-size:16px;font-weight:800;color:#065f46;">€${(
+                (jo.workParts||[]).reduce((s,p)=>s+(Number(p.qty)||0)*(Number(p.price)||0),0)+(Number(jo.laborCost)||0)
+              ).toFixed(2)}</div>
+            </div>
+          </div>
+        </div>
+        ` : ''}
+
+        <div style="background:#fffbeb;border:1.5px solid #fcd34d;border-radius:8px;padding:12px 16px;margin-bottom:20px;">
+          <div style="font-size:9.5px;font-weight:700;color:#92400e;letter-spacing:1px;margin-bottom:8px;">${isEl ? 'ΕΠΟΜΕΝΟ SERVICE' : 'NEXT SERVICE'}</div>
+          <div style="display:flex;gap:24px;">
+            ${nextSvcKm ? `<div style="font-size:11.5px;"><span style="color:#64748b;">Χιλιόμετρα:</span> <b style="color:#1e293b;">${Number(nextSvcKm).toLocaleString('el-GR')} km</b></div>` : ''}
+            <div style="font-size:11.5px;"><span style="color:#64748b;">Ημερομηνία:</span> <b style="color:#1e293b;">${U.fmtDate(nextSvcDate)}</b></div>
+          </div>
+        </div>
 
         <div style="margin-top:28px;border-top:1px solid #e2e8f0;padding-top:8px;display:flex;justify-content:space-between;align-items:center;">
           <div style="font-size:9px;color:#94a3b8;">${U.escape(s.workshopName || 'GearLog')}</div>
@@ -3327,6 +4260,1698 @@
       U.toast(t('error_generic'), 'error');
     } finally {
       document.body.removeChild(wrapper);
+    }
+  }
+
+  // =========================================================
+  //  BUSINESS ADVISOR
+  // =========================================================
+  async function renderAdvisor() {
+    const s = state.settings;
+    const totalCustomers = state.customers.length;
+    const totalVehicles = state.vehicles.length;
+    const totalServices = state.services.length;
+    const totalJOs = (state.jobOrders || []).length;
+    const completedJOs = (state.jobOrders || []).filter((j) => j.status === 'completed').length;
+    const pendingJOs = totalJOs - completedJOs;
+
+    // Revenue from services (parts + labor)
+    let totalRevenue = 0;
+    for (const sv of state.services) totalRevenue += svcRevenue(sv);
+
+    // Avg services per vehicle
+    const avgSvcPerVehicle = totalVehicles ? (totalServices / totalVehicles).toFixed(1) : 0;
+
+    // Services in last 30 days
+    const cutoff30 = new Date(); cutoff30.setDate(cutoff30.getDate() - 30);
+    const recent30 = state.services.filter((sv) => new Date(sv.date) >= cutoff30).length;
+
+    // Vehicles with no service yet
+    const vehicleIdsWithService = new Set(state.services.map((sv) => sv.vehicleId));
+    const noServiceVehicles = state.vehicles.filter((v) => !vehicleIdsWithService.has(v.id)).length;
+
+    const stats = {
+      πελάτες: totalCustomers,
+      οχήματα: totalVehicles,
+      service_εγγραφές: totalServices,
+      εντολές_εργασίας: totalJOs,
+      ολοκληρωμένες_εντολές: completedJOs,
+      εκκρεμείς_εντολές: pendingJOs,
+      εισοδήματα_ευρώ: Math.round(totalRevenue),
+      μέσο_service_ανά_όχημα: avgSvcPerVehicle,
+      service_τελευταίων_30ημερών: recent30,
+      οχήματα_χωρίς_service: noServiceVehicles,
+      εργαλεία_ανά_ώρα_ευρώ: s.laborRate || 35,
+      διάστημα_service_km: s.intervalKm || 10000,
+      διάστημα_service_μήνες: s.intervalMonths || 12,
+    };
+
+    const vehicleTypes = (s.workshopVehicleTypes || 'car')
+      .split(',')
+      .map((v) => v === 'car' ? 'Αυτοκίνητα' : v === 'moto' ? 'Μοτοσυκλέτες' : v === 'truck' ? 'Φορτηγά' : 'Σκάφη')
+      .join(', ');
+
+    $('#view').innerHTML = `
+      ${pageHeader('Σύμβουλος Επιχείρησης')}
+      <div class="max-w-2xl mx-auto p-4 pb-24 sm:pb-4 space-y-4">
+
+        <!-- Intro card -->
+        <div class="bg-gradient-to-br from-violet-600 to-indigo-700 rounded-2xl p-5 text-white">
+          <div class="flex items-center gap-3 mb-3">
+            <div class="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center flex-shrink-0">
+              ${icon('brain-circuit','w-7 h-7')}
+            </div>
+            <div>
+              <div class="font-bold text-lg">Έξυπνος Σύμβουλος</div>
+              <div class="text-violet-200 text-sm">Ανάλυση δεδομένων & προτάσεις ανάπτυξης</div>
+            </div>
+          </div>
+          <p class="text-sm text-violet-100 leading-relaxed">Ο Έξυπνος Σύμβουλος αναλύει τα δεδομένα του συνεργείου σου και συγκρίνει με αντίστοιχα συνεργεία στην Ελλάδα για να σου δώσει εξατομικευμένες συμβουλές ανάπτυξης.</p>
+        </div>
+
+        <!-- Stats snapshot -->
+        <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4">
+          <h2 class="text-sm font-semibold text-slate-500 dark:text-slate-400 mb-3 uppercase tracking-wide">Στιγμιότυπο επιχείρησης</h2>
+          <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            ${[
+              ['users','Πελάτες', totalCustomers, 'text-blue-600', 'bg-blue-100 dark:bg-blue-900/30'],
+              ['car','Οχήματα', totalVehicles, 'text-indigo-600', 'bg-indigo-100 dark:bg-indigo-900/30'],
+              ['wrench','Service', totalServices, 'text-emerald-600', 'bg-emerald-100 dark:bg-emerald-900/30'],
+              ['clipboard-check','Εντολές', totalJOs, 'text-amber-600', 'bg-amber-100 dark:bg-amber-900/30'],
+              ['euro','Έσοδα', '€' + U.fmtNum(totalRevenue), 'text-violet-600', 'bg-violet-100 dark:bg-violet-900/30'],
+              ['activity','Service/30μ.', recent30, 'text-rose-600', 'bg-rose-100 dark:bg-rose-900/30'],
+            ].map(([icn,lbl,val,tc,bg]) => `
+              <div class="flex items-center gap-2.5 p-3 rounded-xl ${bg}">
+                <div class="${tc} flex-shrink-0">${icon(icn,'w-4 h-4')}</div>
+                <div>
+                  <div class="text-base font-bold ${tc}">${val}</div>
+                  <div class="text-xs text-slate-500 dark:text-slate-400">${lbl}</div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+
+        <!-- Vehicle types -->
+        <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 flex items-center justify-between">
+          <div>
+            <div class="text-sm font-medium">Τύποι οχημάτων</div>
+            <div class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">${U.escape(vehicleTypes)}</div>
+          </div>
+          <a href="#/settings" class="text-xs text-blue-600 hover:underline flex items-center gap-1">${icon('settings','w-3.5 h-3.5')} Αλλαγή</a>
+        </div>
+
+        <!-- CTA button -->
+        <button id="btn-get-advice" class="w-full bg-violet-600 hover:bg-violet-700 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-2 text-base transition-colors shadow-lg shadow-violet-600/20">
+          ${icon('sparkles','w-5 h-5')} Ανάλυση & Συμβουλές
+        </button>
+
+        <!-- Result area -->
+        <div id="advisor-result" class="hidden space-y-3"></div>
+
+      </div>
+    `;
+    refreshIcons();
+
+    $('#btn-get-advice').addEventListener('click', async () => {
+      const btn = $('#btn-get-advice');
+      btn.disabled = true;
+      btn.innerHTML = `${icon('loader','w-5 h-5 animate-spin')} Ανάλυση δεδομένων…`;
+      refreshIcons();
+
+      try {
+        const resp = await fetch('/api/advisor', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stats, vehicleTypes }),
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.advice) throw new Error(data.error || 'Σφάλμα');
+
+        const priorityBadge = (p) => {
+          if (p === 'high') return `<span class="text-xs px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 font-medium">Υψηλή προτεραιότητα</span>`;
+          if (p === 'medium') return `<span class="text-xs px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 font-medium">Μέτρια προτεραιότητα</span>`;
+          return `<span class="text-xs px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 font-medium">Χαμηλή προτεραιότητα</span>`;
+        };
+
+        const scoreColor = data.score >= 7 ? 'text-emerald-600' : data.score >= 5 ? 'text-amber-600' : 'text-red-600';
+        const scoreBg = data.score >= 7 ? 'bg-emerald-100 dark:bg-emerald-900/30' : data.score >= 5 ? 'bg-amber-100 dark:bg-amber-900/30' : 'bg-red-100 dark:bg-red-900/30';
+
+        const result = $('#advisor-result');
+        result.innerHTML = `
+          ${data.summary ? `
+          <div class="bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-800 rounded-xl p-4 flex items-start gap-3">
+            <div class="w-12 h-12 ${scoreBg} rounded-xl flex items-center justify-center flex-shrink-0 font-bold text-lg ${scoreColor}">${data.score}/10</div>
+            <div>
+              <div class="text-xs font-semibold text-violet-600 dark:text-violet-400 mb-1 uppercase tracking-wide">Αξιολόγηση</div>
+              <p class="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">${U.escape(data.summary)}</p>
+            </div>
+          </div>` : ''}
+          ${(data.advice || []).map((a, i) => `
+            <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-2">
+              <div class="flex items-start justify-between gap-2">
+                <div class="flex items-center gap-2">
+                  <div class="w-7 h-7 rounded-lg bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 flex items-center justify-center text-sm font-bold flex-shrink-0">${i + 1}</div>
+                  <div class="font-semibold text-sm">${U.escape(a.title)}</div>
+                </div>
+                ${priorityBadge(a.priority)}
+              </div>
+              <p class="text-sm text-slate-600 dark:text-slate-300 leading-relaxed pl-9">${U.escape(a.description)}</p>
+              ${a.impact ? `
+                <div class="pl-9 flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-400">
+                  ${icon('trending-up','w-3.5 h-3.5')} ${U.escape(a.impact)}
+                </div>` : ''}
+            </div>
+          `).join('')}
+        `;
+        result.classList.remove('hidden');
+        result.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        refreshIcons();
+      } catch (e) {
+        U.toast(e.message || 'Σφάλμα σύνδεσης', 'error');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = `${icon('sparkles','w-5 h-5')} Νέα Ανάλυση`;
+        refreshIcons();
+      }
+    });
+  }
+
+  // =========================================================
+  //  APPOINTMENTS
+  // =========================================================
+  async function renderAppointments() {
+    // Only appointments need refreshing here: router() already ran a full loadAll() before
+    // reaching this route, and the other call sites (save/delete) only mutated appointments.
+    state.appointments = await DB.getAll('appointments');
+
+    const todayStr = U.localDateStr();
+    const tomorrowStr = U.localDateStr(Date.now() + 86400000);
+    const apps = state.appointments || [];
+
+    const upcoming = apps
+      .filter((a) => !['completed', 'cancelled'].includes(a.status) && a.date >= todayStr)
+      .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+
+    const past = apps
+      .filter((a) => ['completed', 'cancelled'].includes(a.status) || a.date < todayStr)
+      .sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time));
+
+    const grouped = {};
+    upcoming.forEach((a) => {
+      if (!grouped[a.date]) grouped[a.date] = [];
+      grouped[a.date].push(a);
+    });
+
+    const TYPE_LABELS = {
+      service: 'Service', check: 'Διαγνωστικό', tires: 'Ελαστικά',
+      pickup: 'Παραλαβή', delivery: 'Παράδοση', other: 'Άλλο',
+    };
+    const STATUS_STYLE = {
+      scheduled: 'text-blue-700 bg-blue-50 dark:bg-blue-900/30 dark:text-blue-300',
+      confirmed: 'text-green-700 bg-green-50 dark:bg-green-900/30 dark:text-green-300',
+      completed: 'text-slate-500 bg-slate-100 dark:bg-slate-700',
+      cancelled: 'text-red-500 bg-red-50 dark:bg-red-900/20',
+    };
+    const STATUS_LABELS = { scheduled: 'Προγραμματισμένο', confirmed: 'Επιβεβαιωμένο', completed: 'Ολοκληρώθηκε', cancelled: 'Ακυρώθηκε' };
+
+    function apptCard(a) {
+      const c = customerById(a.customerId);
+      const v = a.vehicleId ? vehicleById(a.vehicleId) : null;
+      const sc = STATUS_STYLE[a.status] || STATUS_STYLE.scheduled;
+      return `
+        <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3 shadow-sm" data-appt="${a.id}">
+          <div class="flex items-start gap-3">
+            <div class="bg-blue-600 text-white text-xs font-bold rounded-lg px-2.5 py-1.5 text-center min-w-[52px] flex-shrink-0 tabular-nums">
+              ${a.time || '--:--'}
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="font-semibold text-sm truncate">${U.escape(c?.name || 'Άγνωστος πελάτης')}</div>
+              ${v ? `<div class="text-xs text-slate-500 dark:text-slate-400 truncate">${U.escape(vehicleLabel(v))}</div>` : ''}
+              <div class="flex flex-wrap items-center gap-1.5 mt-1">
+                <span class="text-xs px-1.5 py-0.5 rounded font-medium ${sc}">${STATUS_LABELS[a.status] || ''}</span>
+                <span class="text-xs text-slate-400">${TYPE_LABELS[a.type] || a.type || ''}</span>
+                ${a.notes ? `<span class="text-xs text-slate-400 truncate max-w-[120px]">${U.escape(a.notes)}</span>` : ''}
+              </div>
+            </div>
+            <div class="flex items-center gap-1 flex-shrink-0">
+              ${c?.phone ? `<button class="appt-sms p-1.5 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors" data-id="${a.id}" title="SMS">${icon('message-square','w-4 h-4')}</button>` : ''}
+              <button class="appt-edit p-1.5 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors" data-id="${a.id}">${icon('edit-2','w-4 h-4')}</button>
+              <button class="appt-del p-1.5 text-slate-400 hover:text-red-500 transition-colors" data-id="${a.id}">${icon('trash-2','w-4 h-4')}</button>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    function groupedHtml() {
+      if (!upcoming.length) return `<div class="text-center text-slate-400 text-sm py-12 flex flex-col items-center gap-2">${icon('calendar','w-10 h-10 opacity-30')}<p>Δεν υπάρχουν επερχόμενα ραντεβού</p><p class="text-xs">Πατήστε «Νέο Ραντεβού» για να προσθέσετε</p></div>`;
+      return Object.entries(grouped).map(([date, appts]) => {
+        const d = new Date(date + 'T00:00:00');
+        const label = date === todayStr ? 'Σήμερα' : date === tomorrowStr ? 'Αύριο'
+          : d.toLocaleDateString('el-GR', { weekday: 'long', day: 'numeric', month: 'long' });
+        const isToday = date === todayStr;
+        return `
+          <div>
+            <div class="flex items-center gap-2 mb-2">
+              <span class="text-xs font-bold uppercase tracking-wide ${isToday ? 'text-blue-600 dark:text-blue-400' : 'text-slate-400'}">${label}</span>
+              <span class="${isToday ? 'bg-blue-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-500'} text-xs rounded-full px-2 py-0.5 font-semibold">${appts.length}</span>
+            </div>
+            <div class="space-y-2">${appts.map(apptCard).join('')}</div>
+          </div>`;
+      }).join('');
+    }
+
+    $('#view').innerHTML = `
+      ${pageHeader('Ραντεβού')}
+      <div class="max-w-2xl mx-auto p-4 pb-24 sm:pb-8 space-y-4">
+        <div class="flex items-center justify-between">
+          <div class="text-sm text-slate-500">${upcoming.length > 0 ? `${upcoming.length} επερχόμενο${upcoming.length === 1 ? '' : 'α'}` : 'Καμία εγγραφή'}</div>
+          <button id="new-appt-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 py-2 rounded-xl text-sm flex items-center gap-1.5 transition-colors shadow-sm">
+            ${icon('plus','w-4 h-4')} Νέο Ραντεβού
+          </button>
+        </div>
+
+        ${groupedHtml()}
+
+        ${past.length ? `
+          <details class="mt-2">
+            <summary class="text-sm font-medium text-slate-500 dark:text-slate-400 cursor-pointer py-2 flex items-center gap-2">
+              ${icon('history','w-4 h-4')} Ιστορικό (${past.length})
+            </summary>
+            <div class="space-y-2 mt-3">
+              ${past.slice(0, 30).map(apptCard).join('')}
+            </div>
+          </details>
+        ` : ''}
+      </div>
+    `;
+    refreshIcons();
+
+    $('#new-appt-btn')?.addEventListener('click', () => showApptForm());
+
+    $$('.appt-sms').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const a = appointmentById(btn.dataset.id);
+        if (!a) return;
+        const c = customerById(a.customerId);
+        if (!c?.phone) return;
+        const ws = state.settings;
+        const d = new Date(a.date + 'T00:00:00').toLocaleDateString('el-GR', { weekday: 'long', day: 'numeric', month: 'long' });
+        const msg = `Υπενθύμιση ραντεβού: ${d} στις ${a.time}${ws.workshopName ? ' στο ' + ws.workshopName : ''}.${ws.workshopPhone ? '\nΤηλ: ' + ws.workshopPhone : ''}`;
+        showSmsCompose(c.phone, c.name, msg);
+      });
+    });
+
+    $$('.appt-edit').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const a = appointmentById(btn.dataset.id);
+        if (a) showApptForm(a);
+      });
+    });
+
+    $$('.appt-del').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('Διαγραφή ραντεβού;')) return;
+        await DB.remove('appointments', btn.dataset.id);
+        state.appointments = await DB.getAll('appointments');
+        renderAppointments();
+      });
+    });
+
+    function showSmsCompose(phone, name, defaultMsg) {
+      const overlay = document.createElement('div');
+      overlay.className = 'fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-4';
+      overlay.innerHTML = `
+        <div class="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-sm shadow-2xl p-5 space-y-3">
+          <div class="flex items-center justify-between">
+            <h3 class="font-bold">SMS — ${U.escape(name)}</h3>
+            <button id="sms-close" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">${icon('x','w-5 h-5')}</button>
+          </div>
+          <div class="text-xs text-slate-400">${U.escape(phone)}</div>
+          <textarea id="sms-text" rows="4" class="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none">${U.escape(defaultMsg)}</textarea>
+          <button id="sms-send" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl flex items-center justify-center gap-2 transition-colors">
+            ${icon('message-square','w-4 h-4')} Αποστολή SMS
+          </button>
+        </div>`;
+      document.body.appendChild(overlay);
+      refreshIcons();
+      overlay.querySelector('#sms-close').addEventListener('click', () => overlay.remove());
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+      overlay.querySelector('#sms-send').addEventListener('click', () => {
+        const msg = overlay.querySelector('#sms-text').value;
+        overlay.remove();
+        window.location.href = U.smsLink(phone, msg);
+      });
+    }
+
+    function showApptForm(appt = null) {
+      const isEdit = !!appt;
+      const a = appt || { status: 'scheduled', type: 'service', date: U.localDateStr(), time: '09:00' };
+
+      const customerOpts = state.customers
+        .slice().sort((x, y) => x.name.localeCompare(y.name, 'el'))
+        .map((c) => `<option value="${c.id}" ${a.customerId === c.id ? 'selected' : ''}>${U.escape(c.name)}</option>`)
+        .join('');
+
+      const vehOpts = (a.customerId ? state.vehicles.filter((v) => v.customerId === a.customerId) : [])
+        .map((v) => `<option value="${v.id}" ${a.vehicleId === v.id ? 'selected' : ''}>${U.escape(vehicleLabel(v))}</option>`)
+        .join('');
+
+      const overlay = document.createElement('div');
+      overlay.className = 'fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-4';
+      overlay.innerHTML = `
+        <div class="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-md shadow-2xl flex flex-col max-h-[92vh]">
+          <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex-shrink-0">
+            <h3 class="font-bold text-lg">${isEdit ? 'Επεξεργασία' : 'Νέο'} Ραντεβού</h3>
+            <button id="af-close" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">${icon('x','w-5 h-5')}</button>
+          </div>
+          <div class="overflow-y-auto flex-1 p-5 space-y-3">
+            <div>
+              <label class="block text-sm font-medium mb-1">Πελάτης <span class="text-red-500">*</span></label>
+              <select id="af-customer" class="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="">— Επιλέξτε πελάτη —</option>
+                ${customerOpts}
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1">Όχημα</label>
+              <select id="af-vehicle" class="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="">— Χωρίς συγκεκριμένο όχημα —</option>
+                ${vehOpts}
+              </select>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-sm font-medium mb-1">Ημερομηνία <span class="text-red-500">*</span></label>
+                <input type="date" id="af-date" value="${a.date || ''}" class="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label class="block text-sm font-medium mb-1">Ώρα <span class="text-red-500">*</span></label>
+                <input type="time" id="af-time" value="${a.time || ''}" class="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1">Τύπος εργασίας</label>
+              <select id="af-type" class="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="service" ${a.type==='service'?'selected':''}>Service</option>
+                <option value="check" ${a.type==='check'?'selected':''}>Έλεγχος / Διαγνωστικό</option>
+                <option value="tires" ${a.type==='tires'?'selected':''}>Ελαστικά</option>
+                <option value="pickup" ${a.type==='pickup'?'selected':''}>Παραλαβή οχήματος</option>
+                <option value="delivery" ${a.type==='delivery'?'selected':''}>Παράδοση οχήματος</option>
+                <option value="other" ${a.type==='other'?'selected':''}>Άλλο</option>
+              </select>
+            </div>
+            ${isEdit ? `
+            <div>
+              <label class="block text-sm font-medium mb-1">Κατάσταση</label>
+              <select id="af-status" class="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="scheduled" ${a.status==='scheduled'?'selected':''}>Προγραμματισμένο</option>
+                <option value="confirmed" ${a.status==='confirmed'?'selected':''}>Επιβεβαιωμένο</option>
+                <option value="completed" ${a.status==='completed'?'selected':''}>Ολοκληρώθηκε</option>
+                <option value="cancelled" ${a.status==='cancelled'?'selected':''}>Ακυρώθηκε</option>
+              </select>
+            </div>
+            ` : ''}
+            <div>
+              <label class="block text-sm font-medium mb-1">Σημειώσεις</label>
+              <textarea id="af-notes" rows="2" placeholder="π.χ. Αλλαγή λαδιών και φίλτρου…" class="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none">${U.escape(a.notes || '')}</textarea>
+            </div>
+          </div>
+          <div class="flex gap-2 px-5 py-4 border-t border-slate-100 dark:border-slate-800 flex-shrink-0">
+            <button id="af-save" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors">Αποθήκευση</button>
+            <button id="af-cancel" class="flex-1 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 font-medium py-2.5 rounded-xl text-sm transition-colors">Ακύρωση</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      refreshIcons();
+
+      const custSel = overlay.querySelector('#af-customer');
+      const vehSel = overlay.querySelector('#af-vehicle');
+
+      custSel.addEventListener('change', () => {
+        const cid = custSel.value;
+        const vehs = cid ? state.vehicles.filter((v) => v.customerId === cid) : [];
+        vehSel.innerHTML = '<option value="">— Χωρίς συγκεκριμένο όχημα —</option>' +
+          vehs.map((v) => `<option value="${v.id}">${U.escape(vehicleLabel(v))}</option>`).join('');
+      });
+
+      const closeOv = () => overlay.remove();
+      overlay.querySelector('#af-close').addEventListener('click', closeOv);
+      overlay.querySelector('#af-cancel').addEventListener('click', closeOv);
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) closeOv(); });
+
+      overlay.querySelector('#af-save').addEventListener('click', async () => {
+        const date = overlay.querySelector('#af-date').value;
+        const time = overlay.querySelector('#af-time').value;
+        const customerId = custSel.value;
+        if (!date || !time || !customerId) {
+          U.toast('Συμπληρώστε πελάτη, ημερομηνία και ώρα.', 'error');
+          return;
+        }
+        const saved = {
+          ...(isEdit ? { id: a.id, createdAt: a.createdAt } : {}),
+          customerId,
+          vehicleId: vehSel.value || null,
+          date,
+          time,
+          type: overlay.querySelector('#af-type').value,
+          status: isEdit ? overlay.querySelector('#af-status').value : 'scheduled',
+          notes: overlay.querySelector('#af-notes').value.trim(),
+        };
+        await DB.add('appointments', saved);
+        state.appointments = await DB.getAll('appointments');
+        overlay.remove();
+        renderAppointments();
+        U.toast(isEdit ? 'Ραντεβού ενημερώθηκε' : 'Ραντεβού αποθηκεύτηκε');
+      });
+    }
+  }
+
+  // =========================================================
+  //  STATISTICS & ANALYTICS
+  // =========================================================
+  async function renderStats() {
+    const s = state.settings;
+    const sym = { EUR: '€', USD: '$', GBP: '£' }[s.currency || 'EUR'] || '€';
+    const fmt = (n) => U.fmtNum(n);
+
+    const now = new Date();
+    const thisYearStart = new Date(now.getFullYear(), 0, 1);
+
+    // Build last 12 months array
+    const months = [];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push({
+        label: d.toLocaleString('el-GR', { month: 'short' }) + (d.getFullYear() !== now.getFullYear() ? ' \'' + String(d.getFullYear()).slice(2) : ''),
+        year: d.getFullYear(),
+        month: d.getMonth(),
+        revenue: 0,
+        count: 0,
+      });
+    }
+
+    state.services.forEach((sv) => {
+      if (!sv.date) return;
+      const d = new Date(sv.date);
+      const entry = months.find((m) => m.year === d.getFullYear() && m.month === d.getMonth());
+      if (entry) { entry.revenue += svcRevenue(sv); entry.count++; }
+    });
+
+    const totalRevenue12 = months.reduce((s, m) => s + m.revenue, 0);
+    const activeMths = months.filter((m) => m.count > 0);
+    const avgMonthRev = activeMths.length ? totalRevenue12 / activeMths.length : 0;
+    const bestMonth = months.reduce((a, b) => (a.revenue > b.revenue ? a : b), months[0]);
+    const thisMonthRev = months[months.length - 1].revenue;
+    const thisYearRev = state.services.filter((sv) => sv.date && new Date(sv.date) >= thisYearStart).reduce((sum, sv) => sum + svcRevenue(sv), 0);
+
+    // Service type breakdown
+    const typeCounts = {};
+    const typeRevenue = {};
+    state.services.forEach((sv) => {
+      const tp = sv.type || 'Άλλο';
+      typeCounts[tp] = (typeCounts[tp] || 0) + 1;
+      typeRevenue[tp] = (typeRevenue[tp] || 0) + svcRevenue(sv);
+    });
+    const topTypes = Object.entries(typeCounts).sort((a, b) => b[1] - a[1]).slice(0, 8);
+    const maxTypeCount = topTypes[0]?.[1] || 1;
+
+    // Mechanic performance
+    const mechStats = {};
+    state.services.forEach((sv) => {
+      const m = sv.mechanic || '—';
+      if (!mechStats[m]) mechStats[m] = { count: 0, revenue: 0 };
+      mechStats[m].count++;
+      mechStats[m].revenue += svcRevenue(sv);
+    });
+    const topMechanics = Object.entries(mechStats).sort((a, b) => b[1].revenue - a[1].revenue).slice(0, 5);
+
+    // Customer stats
+    const newCustYear = state.customers.filter((c) => c.createdAt && new Date(c.createdAt) >= thisYearStart).length;
+    const statsVehicleIdsWithService = new Set(state.services.map((sv) => sv.vehicleId));
+    const activeCust = state.customers.filter((c) => {
+      const cvs = vehiclesForCustomer(c.id);
+      return cvs.some((v) => statsVehicleIdsWithService.has(v.id));
+    }).length;
+
+    $('#view').innerHTML = `
+      ${pageHeader('Στατιστικά & Αναλύσεις', { back: false })}
+      <div class="max-w-5xl mx-auto p-4 pb-24 sm:pb-4 space-y-5">
+
+        <!-- KPI row -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          ${[
+            ['trending-up', 'Έσοδα 12 μηνών', sym + fmt(totalRevenue12), 'text-emerald-600', 'bg-emerald-100 dark:bg-emerald-900/30'],
+            ['calendar', 'Τρέχων μήνας', sym + fmt(thisMonthRev), 'text-blue-600', 'bg-blue-100 dark:bg-blue-900/30'],
+            ['bar-chart-2', 'Μέσος μήνας', sym + fmt(avgMonthRev), 'text-violet-600', 'bg-violet-100 dark:bg-violet-900/30'],
+            ['star', 'Καλύτερος μήνας', sym + fmt(bestMonth ? bestMonth.revenue : 0), 'text-amber-600', 'bg-amber-100 dark:bg-amber-900/30'],
+          ].map(([icn, lbl, val, tc, bg]) => `
+            <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4">
+              <div class="w-9 h-9 ${bg} ${tc} rounded-xl flex items-center justify-center mb-2">${icon(icn,'w-4 h-4')}</div>
+              <div class="text-lg font-bold">${val}</div>
+              <div class="text-xs text-slate-500 dark:text-slate-400">${lbl}</div>
+            </div>
+          `).join('')}
+        </div>
+
+        <!-- Monthly revenue chart -->
+        <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4">
+          <h2 class="font-semibold text-sm mb-4">Μηνιαία Έσοδα — τελευταίοι 12 μήνες</h2>
+          <canvas id="revenue-chart" height="160"></canvas>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+          <!-- Top service types -->
+          <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4">
+            <h2 class="font-semibold text-sm mb-3">Τύποι Service</h2>
+            ${topTypes.length ? `<div class="space-y-2.5">
+              ${topTypes.map(([tp, cnt]) => `
+                <div>
+                  <div class="flex justify-between text-xs mb-1">
+                    <span class="font-medium truncate max-w-[65%]">${U.escape(tp)}</span>
+                    <span class="text-slate-400 flex-shrink-0">${cnt}x · ${sym}${fmt(typeRevenue[tp] || 0)}</span>
+                  </div>
+                  <div class="w-full bg-slate-100 dark:bg-slate-700 rounded-full h-1.5">
+                    <div class="bg-blue-500 h-1.5 rounded-full" style="width:${Math.round((cnt/maxTypeCount)*100)}%"></div>
+                  </div>
+                </div>`).join('')}
+            </div>` : `<p class="text-sm text-slate-400 text-center py-6">Δεν υπάρχουν δεδομένα</p>`}
+          </div>
+
+          <!-- Mechanic performance -->
+          <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4">
+            <h2 class="font-semibold text-sm mb-3">Μηχανικοί</h2>
+            ${topMechanics.length ? `<div class="space-y-3">
+              ${topMechanics.map(([name, stat]) => `
+                <div class="flex items-center gap-3">
+                  <div class="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-xs font-bold text-slate-600 dark:text-slate-300 flex-shrink-0">
+                    ${U.escape((name === '—' ? '?' : name).slice(0,2).toUpperCase())}
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <div class="text-sm font-medium truncate">${U.escape(name)}</div>
+                    <div class="text-xs text-slate-400">${stat.count} service · ${sym}${fmt(stat.revenue)}</div>
+                  </div>
+                </div>`).join('')}
+            </div>` : `<p class="text-sm text-slate-400 text-center py-6">Δεν υπάρχουν δεδομένα</p>`}
+          </div>
+
+        </div>
+
+        <!-- Customer overview -->
+        <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4">
+          <h2 class="font-semibold text-sm mb-3">Ανάλυση Πελατών</h2>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            ${[
+              ['Σύνολο πελατών', state.customers.length],
+              ['Ενεργοί (με service)', activeCust],
+              ['Νέοι φέτος', newCustYear],
+              ['Σύνολο οχημάτων', state.vehicles.length],
+            ].map(([lbl, val]) => `
+              <div class="text-center p-3 bg-slate-50 dark:bg-slate-700/40 rounded-xl">
+                <div class="text-2xl font-bold">${val}</div>
+                <div class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">${lbl}</div>
+              </div>`).join('')}
+          </div>
+        </div>
+
+        <!-- CTA to marketing -->
+        <a href="#/marketing" class="block w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3.5 rounded-2xl text-center flex items-center justify-center gap-2 transition-colors">
+          ${icon('megaphone','w-5 h-5')} Αποστολή μηνυμάτων σε πελάτες
+        </a>
+
+      </div>
+    `;
+    refreshIcons();
+
+    requestAnimationFrame(() => {
+      const canvas = document.getElementById('revenue-chart');
+      if (!canvas || !window.Chart) return;
+      const isDark = document.documentElement.classList.contains('dark');
+      const gridColor = isDark ? 'rgba(148,163,184,0.1)' : 'rgba(148,163,184,0.2)';
+      const labelColor = isDark ? '#94a3b8' : '#64748b';
+      new Chart(canvas, {
+        type: 'bar',
+        data: {
+          labels: months.map((m) => m.label),
+          datasets: [{
+            data: months.map((m) => Math.round(m.revenue)),
+            backgroundColor: months.map((_, i) => i === months.length - 1 ? 'rgba(99,102,241,0.85)' : 'rgba(59,130,246,0.65)'),
+            borderRadius: 5,
+            borderSkipped: false,
+          }],
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: { label: (ctx) => sym + U.fmtNum(ctx.raw) } },
+          },
+          scales: {
+            x: { grid: { display: false }, ticks: { color: labelColor, font: { size: 10 } } },
+            y: {
+              grid: { color: gridColor },
+              ticks: { color: labelColor, font: { size: 10 }, callback: (v) => sym + U.fmtNum(v) },
+              beginAtZero: true,
+            },
+          },
+        },
+      });
+    });
+  }
+
+  // =========================================================
+  //  MARKETING & BULK MESSAGING
+  // =========================================================
+  async function renderMarketing() {
+    const s = state.settings;
+
+    const now = new Date();
+    const cutoff90 = new Date(now); cutoff90.setDate(cutoff90.getDate() - 90);
+
+    const customerData = state.customers.map((c) => {
+      const cvehicles = vehiclesForCustomer(c.id);
+      const cSvcs = state.services.filter((sv) => cvehicles.some((v) => v.id === sv.vehicleId));
+      const lastSvcDate = cSvcs.length ? new Date(Math.max(...cSvcs.map((sv) => new Date(sv.date)))) : null;
+      const overdueVs = cvehicles.filter((v) => {
+        const r = U.reminderStatus(v, servicesForVehicle(v.id), s);
+        return r.status === 'overdue' || r.status === 'upcoming';
+      });
+      return {
+        c,
+        vehicles: cvehicles,
+        lastSvcDate,
+        isInactive: !lastSvcDate || lastSvcDate < cutoff90,
+        needsService: overdueVs.length > 0,
+      };
+    });
+
+    const TEMPLATES = [
+      {
+        id: 'pickup_ready',
+        label: 'Παραλαβή οχήματος',
+        icon: 'check-circle',
+        color: 'text-emerald-600',
+        bg: 'bg-emerald-100 dark:bg-emerald-900/20',
+        text(c, v) {
+          return [
+            `Αγαπητέ/ή ${c.name},`,
+            ``,
+            `Το όχημά σας${v ? ' ' + [v.brand, v.model].filter(Boolean).join(' ') + (v.plate ? ' (' + v.plate.toUpperCase() + ')' : '') : ''} είναι έτοιμο για παραλαβή! 🔧`,
+            ``,
+            `Είμαστε στη διάθεσή σας για οποιαδήποτε απορία.`,
+            ``,
+            [s.workshopName, s.workshopPhone].filter(Boolean).join('\n'),
+          ].join('\n').trim();
+        },
+      },
+      {
+        id: 'service_reminder',
+        label: 'Υπενθύμιση service',
+        icon: 'bell',
+        color: 'text-amber-600',
+        bg: 'bg-amber-100 dark:bg-amber-900/20',
+        text(c, v) {
+          return [
+            `Αγαπητέ/ή ${c.name},`,
+            ``,
+            `Σας υπενθυμίζουμε ότι${v ? ' το ' + [v.brand, v.model].filter(Boolean).join(' ') + (v.plate ? ' (' + v.plate.toUpperCase() + ')' : '') : ' το όχημά σας'} χρειάζεται service! 🛠️`,
+            ``,
+            `Επικοινωνήστε μαζί μας για ραντεβού.`,
+            ``,
+            [s.workshopName, s.workshopPhone].filter(Boolean).join('\n'),
+          ].join('\n').trim();
+        },
+      },
+      {
+        id: 'promo',
+        label: 'Προωθητική προσφορά',
+        icon: 'tag',
+        color: 'text-blue-600',
+        bg: 'bg-blue-100 dark:bg-blue-900/20',
+        text(c, v) {
+          return [
+            `Αγαπητέ/ή ${c.name},`,
+            ``,
+            `Σας ενημερώνουμε για την τρέχουσα προσφορά μας! 🎉`,
+            ``,
+            `[ΓΡΑΨΤΕ ΤΗΝ ΠΡΟΣΦΟΡΑ ΣΑΣ ΕΔΩ]`,
+            ``,
+            `Επικοινωνήστε μαζί μας για περισσότερες πληροφορίες.`,
+            ``,
+            [s.workshopName, s.workshopPhone].filter(Boolean).join('\n'),
+          ].join('\n').trim();
+        },
+      },
+      {
+        id: 'seasonal',
+        label: 'Εποχιακός έλεγχος',
+        icon: 'sun',
+        color: 'text-orange-600',
+        bg: 'bg-orange-100 dark:bg-orange-900/20',
+        text(c, v) {
+          return [
+            `Αγαπητέ/ή ${c.name},`,
+            ``,
+            `Η εποχή αλλάζει! Φροντίστε${v ? ' το ' + [v.brand, v.model].filter(Boolean).join(' ') : ' το όχημά σας'} έγκαιρα:`,
+            `• Έλεγχος αντιψυκτικού`,
+            `• Ελαστικά εποχής`,
+            `• Μπαταρία & φώτα`,
+            ``,
+            `Καλέστε μας για ραντεβού.`,
+            ``,
+            [s.workshopName, s.workshopPhone].filter(Boolean).join('\n'),
+          ].join('\n').trim();
+        },
+      },
+      {
+        id: 'kteo_reminder',
+        label: 'Υπενθύμιση ΚΤΕΟ',
+        icon: 'shield-check',
+        color: 'text-blue-600',
+        bg: 'bg-blue-100 dark:bg-blue-900/20',
+        text(c, v) {
+          return [
+            `Αγαπητέ/ή ${c.name},`,
+            ``,
+            `Σας ενημερώνουμε ότι πλησιάζει η ημερομηνία ΚΤΕΟ${v ? ' για το ' + [v.brand, v.model].filter(Boolean).join(' ') + (v.plate ? ' (' + v.plate.toUpperCase() + ')' : '') : ' του οχήματός σας'}.`,
+            ``,
+            `Συστήνουμε έλεγχο πριν την επίσκεψη στο ΚΤΕΟ για επιτυχή διέλευση.`,
+            ``,
+            `Καλέστε μας για ραντεβού.`,
+            ``,
+            [s.workshopName, s.workshopPhone].filter(Boolean).join('\n'),
+          ].join('\n').trim();
+        },
+      },
+      {
+        id: 'emissions_reminder',
+        label: 'Κάρτα Καυσαερίων',
+        icon: 'wind',
+        color: 'text-cyan-600',
+        bg: 'bg-cyan-100 dark:bg-cyan-900/20',
+        text(c, v) {
+          return [
+            `Αγαπητέ/ή ${c.name},`,
+            ``,
+            `Σας ενημερώνουμε ότι λήγει η κάρτα καυσαερίων${v ? ' για το ' + [v.brand, v.model].filter(Boolean).join(' ') + (v.plate ? ' (' + v.plate.toUpperCase() + ')' : '') : ' του οχήματός σας'}.`,
+            ``,
+            `Η κάρτα καυσαερίων ανανεώνεται ετησίως. Επικοινωνήστε μαζί μας.`,
+            ``,
+            [s.workshopName, s.workshopPhone].filter(Boolean).join('\n'),
+          ].join('\n').trim();
+        },
+      },
+    ];
+
+    const kteoNear = customerData.filter((cd) => cd.vehicles.some((v) => { const st = kteoStatus(v); return st && st.daysLeft <= 60; }));
+    const emissionsNear = customerData.filter((cd) => cd.vehicles.some((v) => { const st = emissionsStatus(v); return st && st.daysLeft <= 60; }));
+
+    const FILTERS = [
+      { id: 'all',          label: 'Όλοι',                   count: customerData.length },
+      { id: 'needs_service',label: 'Χρειάζονται service',    count: customerData.filter((cd) => cd.needsService).length },
+      { id: 'inactive',     label: 'Ανενεργοί (3+ μήνες)',   count: customerData.filter((cd) => cd.isInactive && cd.vehicles.length > 0).length },
+      { id: 'kteo_near',    label: 'ΚΤΕΟ λήγει',             count: kteoNear.length },
+      { id: 'emissions_near', label: 'Καυσαέρια λήγουν',     count: emissionsNear.length },
+    ];
+
+    let activeFilter = 'all';
+    let activeTpl = TEMPLATES[1];
+    const selectedIds = new Set();
+
+    function getFiltered() {
+      return customerData.filter((cd) => {
+        if (activeFilter === 'needs_service') return cd.needsService;
+        if (activeFilter === 'inactive') return cd.isInactive && cd.vehicles.length > 0;
+        if (activeFilter === 'kteo_near') return cd.vehicles.some((v) => { const st = kteoStatus(v); return st && st.daysLeft <= 60; });
+        if (activeFilter === 'emissions_near') return cd.vehicles.some((v) => { const st = emissionsStatus(v); return st && st.daysLeft <= 60; });
+        return true;
+      });
+    }
+
+    function tplDefaultText(tpl) {
+      return tpl.text({ name: '{όνομα}' }, null);
+    }
+
+    function buildMsg(cd) {
+      const editor = document.getElementById('mkt-msg-editor');
+      const raw = editor?.value?.trim() ? editor.value : activeTpl.text(cd.c, cd.vehicles[0] || null);
+      const v = cd.vehicles[0];
+      const vehicleStr = v ? [v.brand, v.model].filter(Boolean).join(' ') + (v.plate ? ' (' + v.plate.toUpperCase() + ')' : '') : 'το όχημά σας';
+      return raw
+        .replace(/\{όνομα\}/g, cd.c.name || 'πελάτη')
+        .replace(/\{όχημα\}/g, vehicleStr);
+    }
+
+    $('#view').innerHTML = `
+      ${pageHeader('Marketing & Ενημερώσεις', { back: false })}
+      <div class="max-w-3xl mx-auto p-4 pb-28 sm:pb-8 space-y-4">
+
+        <div class="bg-gradient-to-br from-indigo-600 to-blue-700 rounded-2xl p-5 text-white">
+          <div class="flex items-center gap-3 mb-2">
+            <div class="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center flex-shrink-0">${icon('megaphone','w-6 h-6')}</div>
+            <div>
+              <div class="font-bold">Μαζική Αποστολή Μηνυμάτων</div>
+              <div class="text-blue-200 text-sm">${state.customers.length} πελάτες στο αρχείο</div>
+            </div>
+          </div>
+          <p class="text-sm text-blue-100 leading-relaxed">Επιλέξτε πελάτες, πρότυπο μηνύματος και στείλτε με WhatsApp ή αντιγράψτε για μαζική αποστολή.</p>
+        </div>
+
+        <!-- Template selector -->
+        <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4">
+          <h2 class="font-semibold text-sm mb-3">Πρότυπο Μηνύματος</h2>
+          <div class="grid grid-cols-2 gap-2" id="tpl-grid">
+            ${TEMPLATES.map((tpl) => `
+              <button data-tpl="${tpl.id}" class="tpl-btn flex items-center gap-2 p-3 rounded-xl border-2 text-left transition-all ${tpl.id === activeTpl.id ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20' : 'border-slate-200 dark:border-slate-700'}">
+                <div class="${tpl.bg} ${tpl.color} w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0">${icon(tpl.icon,'w-4 h-4')}</div>
+                <span class="text-xs font-medium">${U.escape(tpl.label)}</span>
+              </button>`).join('')}
+          </div>
+        </div>
+
+        <!-- Message editor -->
+        <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4">
+          <div class="flex items-center justify-between mb-2">
+            <h2 class="font-semibold text-sm flex items-center gap-1.5">${icon('edit-3','w-4 h-4 text-slate-400')} Κείμενο μηνύματος</h2>
+            <button id="msg-reset" class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1">${icon('rotate-ccw','w-3 h-3')} Επαναφορά</button>
+          </div>
+          <textarea id="mkt-msg-editor" rows="7"
+            class="w-full px-3 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-y leading-relaxed font-mono"
+            placeholder="Γράψτε το μήνυμά σας εδώ…"></textarea>
+          <p class="text-xs text-slate-400 mt-1.5 leading-relaxed">
+            Χρησιμοποιήστε <code class="bg-slate-100 dark:bg-slate-700 px-1 py-0.5 rounded text-indigo-600 dark:text-indigo-400">{όνομα}</code> και
+            <code class="bg-slate-100 dark:bg-slate-700 px-1 py-0.5 rounded text-indigo-600 dark:text-indigo-400">{όχημα}</code> — αντικαθίστανται αυτόματα για κάθε πελάτη.
+          </p>
+        </div>
+
+        <!-- Customer list -->
+        <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden">
+
+          <!-- Filter tabs -->
+          <div class="flex overflow-x-auto border-b border-slate-200 dark:border-slate-700" id="mkt-filter-tabs">
+            ${FILTERS.map((f) => `
+              <button data-filter="${f.id}" class="mkt-tab flex-shrink-0 px-4 py-2.5 text-sm font-medium transition-colors ${f.id === activeFilter ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/40 dark:bg-indigo-900/10' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}">
+                ${U.escape(f.label)} <span class="opacity-60 text-xs">(${f.count})</span>
+              </button>`).join('')}
+          </div>
+
+          <div id="mkt-customer-list" class="divide-y divide-slate-100 dark:divide-slate-700 max-h-[45vh] overflow-y-auto"></div>
+
+          <!-- Bottom action bar -->
+          <div class="p-3 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between gap-3">
+            <label class="flex items-center gap-2 text-sm cursor-pointer flex-shrink-0">
+              <input type="checkbox" id="mkt-select-all" class="w-4 h-4 rounded accent-indigo-600" />
+              <span class="text-slate-600 dark:text-slate-400 text-xs">Όλοι (<span id="mkt-sel-count">0</span>)</span>
+            </label>
+            <button id="mkt-send-btn" disabled class="flex-1 bg-green-500 hover:bg-green-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-lg flex items-center justify-center gap-2 transition-colors">
+              <svg class="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.123.555 4.116 1.529 5.843L0 24l6.306-1.505A11.945 11.945 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 22c-1.886 0-3.655-.493-5.193-1.357l-.371-.22-3.747.895.93-3.65-.24-.385A9.96 9.96 0 012 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10z"/></svg>
+              <span id="mkt-send-label">Αποστολή</span>
+            </button>
+          </div>
+        </div>
+
+      </div>
+    `;
+    refreshIcons();
+
+    function renderList() {
+      const filtered = getFiltered();
+      const list = $('#mkt-customer-list');
+      if (!filtered.length) {
+        list.innerHTML = `<div class="text-center py-10 text-sm text-slate-400">Δεν υπάρχουν πελάτες σε αυτή την κατηγορία</div>`;
+        updateBar();
+        return;
+      }
+      list.innerHTML = filtered.map((cd) => {
+        const v = cd.vehicles[0];
+        return `
+          <label class="flex items-center gap-3 p-3 hover:bg-slate-50 dark:hover:bg-slate-700/30 cursor-pointer">
+            <input type="checkbox" data-cid="${cd.c.id}" class="mkt-chk w-4 h-4 rounded accent-indigo-600 flex-shrink-0" ${selectedIds.has(cd.c.id) ? 'checked' : ''} />
+            <div class="w-9 h-9 rounded-full bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-400 flex items-center justify-center font-semibold text-sm flex-shrink-0">
+              ${U.escape((cd.c.name || '?').slice(0,1).toUpperCase())}
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="font-medium text-sm truncate">${U.escape(cd.c.name)}</div>
+              <div class="text-xs text-slate-400 truncate">${cd.c.phone ? U.escape(cd.c.phone) : '—'}${v ? ' · ' + U.escape([v.brand, v.model].filter(Boolean).join(' ')) : ''}</div>
+            </div>
+            <div class="flex items-center gap-1 flex-shrink-0">
+              ${cd.needsService ? `<span class="text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded-full">service</span>` : ''}
+              ${!cd.c.phone ? `<span class="text-xs text-red-400">χωρίς τηλ.</span>` : ''}
+            </div>
+          </label>`;
+      }).join('');
+      $$('.mkt-chk').forEach((chk) => {
+        chk.addEventListener('change', () => {
+          if (chk.checked) selectedIds.add(chk.dataset.cid);
+          else selectedIds.delete(chk.dataset.cid);
+          updateBar();
+        });
+      });
+      updateBar();
+    }
+
+    function updateBar() {
+      const n = selectedIds.size;
+      const el = $('#mkt-sel-count');
+      if (el) el.textContent = n;
+      const lbl = $('#mkt-send-label');
+      if (lbl) lbl.textContent = n > 0 ? `Αποστολή (${n})` : 'Αποστολή';
+      const btn = $('#mkt-send-btn');
+      if (btn) btn.disabled = n === 0;
+      const allChk = $('#mkt-select-all');
+      if (allChk) {
+        const filtered = getFiltered();
+        allChk.checked = filtered.length > 0 && filtered.every((cd) => selectedIds.has(cd.c.id));
+        allChk.indeterminate = !allChk.checked && n > 0;
+      }
+    }
+
+    // Fill editor with initial template
+    const editor = document.getElementById('mkt-msg-editor');
+    if (editor) editor.value = tplDefaultText(activeTpl);
+
+    // Reset button
+    document.getElementById('msg-reset')?.addEventListener('click', () => {
+      if (editor) editor.value = tplDefaultText(activeTpl);
+    });
+
+    renderList();
+
+    $$('.mkt-tab').forEach((tab) => {
+      tab.addEventListener('click', () => {
+        activeFilter = tab.dataset.filter;
+        selectedIds.clear();
+        $$('.mkt-tab').forEach((t) => {
+          const on = t.dataset.filter === activeFilter;
+          t.className = `mkt-tab flex-shrink-0 px-4 py-2.5 text-sm font-medium transition-colors ${on ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/40 dark:bg-indigo-900/10' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`;
+        });
+        renderList();
+      });
+    });
+
+    $$('.tpl-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        activeTpl = TEMPLATES.find((t) => t.id === btn.dataset.tpl) || TEMPLATES[0];
+        $$('.tpl-btn').forEach((b) => {
+          const on = b.dataset.tpl === activeTpl.id;
+          b.className = `tpl-btn flex items-center gap-2 p-3 rounded-xl border-2 text-left transition-all ${on ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20' : 'border-slate-200 dark:border-slate-700'}`;
+        });
+        const ed = document.getElementById('mkt-msg-editor');
+        if (ed) ed.value = tplDefaultText(activeTpl);
+      });
+    });
+
+    $('#mkt-select-all').addEventListener('change', (e) => {
+      const filtered = getFiltered();
+      if (e.target.checked) filtered.forEach((cd) => selectedIds.add(cd.c.id));
+      else selectedIds.clear();
+      renderList();
+    });
+
+    $('#mkt-send-btn').addEventListener('click', () => {
+      const toSend = customerData.filter((cd) => selectedIds.has(cd.c.id) && cd.c.phone);
+      const noPhone = customerData.filter((cd) => selectedIds.has(cd.c.id) && !cd.c.phone);
+
+      if (!toSend.length) { U.toast('Οι επιλεγμένοι πελάτες δεν έχουν τηλέφωνο', 'error'); return; }
+
+      const overlay = document.createElement('div');
+      overlay.className = 'fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4';
+      overlay.innerHTML = `
+        <div class="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-lg shadow-2xl max-h-[85vh] flex flex-col">
+          <div class="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between flex-shrink-0">
+            <div>
+              <div class="font-bold">Αποστολή μηνυμάτων</div>
+              <div class="text-xs text-slate-500">${toSend.length} πελάτες με τηλέφωνο${noPhone.length ? ' · ' + noPhone.length + ' χωρίς' : ''} · ${U.escape(activeTpl.label)}</div>
+            </div>
+            <button id="bulk-dlg-close" class="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 flex-shrink-0">${icon('x','w-5 h-5')}</button>
+          </div>
+          <div class="overflow-y-auto flex-1 divide-y divide-slate-100 dark:divide-slate-700">
+            ${toSend.map((cd) => {
+              const phone = (cd.c.phone || '').replace(/\D/g, '');
+              const waPhone = phone.startsWith('0') ? '30' + phone.slice(1) : phone.startsWith('30') ? phone : '30' + phone;
+              const waLink = `https://wa.me/${waPhone}?text=${encodeURIComponent(buildMsg(cd))}`;
+              return `
+                <div class="p-3 flex items-center gap-3">
+                  <div class="w-9 h-9 rounded-full bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-400 flex items-center justify-center font-semibold text-sm flex-shrink-0">
+                    ${U.escape((cd.c.name || '?').slice(0,1).toUpperCase())}
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <div class="font-medium text-sm truncate">${U.escape(cd.c.name)}</div>
+                    <div class="text-xs text-slate-400">${U.escape(cd.c.phone || '')}</div>
+                  </div>
+                  <a href="${waLink}" target="_blank" class="flex-shrink-0 bg-green-500 hover:bg-green-600 text-white text-xs font-medium px-3 py-1.5 rounded-lg">
+                    WhatsApp
+                  </a>
+                </div>`;
+            }).join('')}
+            ${noPhone.map((cd) => `
+              <div class="p-3 flex items-center gap-3 opacity-50">
+                <div class="w-9 h-9 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-400 flex items-center justify-center font-semibold text-sm flex-shrink-0">
+                  ${U.escape((cd.c.name || '?').slice(0,1).toUpperCase())}
+                </div>
+                <div class="flex-1 min-w-0 text-sm">${U.escape(cd.c.name)}</div>
+                <span class="text-xs text-red-400">χωρίς τηλέφωνο</span>
+              </div>`).join('')}
+          </div>
+          <div class="p-4 border-t border-slate-200 dark:border-slate-700 flex-shrink-0">
+            <button id="bulk-copy-all" class="w-full bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 font-medium py-2.5 rounded-xl text-sm flex items-center justify-center gap-2">
+              ${icon('copy','w-4 h-4')} Αντιγραφή όλων των μηνυμάτων
+            </button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+      refreshIcons();
+
+      overlay.querySelector('#bulk-dlg-close').addEventListener('click', () => overlay.remove());
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+      overlay.querySelector('#bulk-copy-all').addEventListener('click', () => {
+        const all = toSend.map((cd) => `=== ${cd.c.name} (${cd.c.phone || '—'}) ===\n${buildMsg(cd)}`).join('\n\n---\n\n');
+        U.share(all, 'Μηνύματα Marketing');
+      });
+    });
+  }
+
+  // =========================================================
+  //  LICENSE / SUBSCRIPTION CHECK
+  // =========================================================
+  function showActivationScreen() {
+    const el = document.createElement('div');
+    el.id = 'activation-screen';
+    el.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#0f172a;display:flex;align-items:center;justify-content:center;padding:1.5rem;';
+    el.innerHTML = `
+      <div style="background:#1e293b;border-radius:1rem;padding:2rem;width:100%;max-width:360px;text-align:center;border:1px solid #334155;">
+        <img src="icon-192.png" style="width:72px;height:72px;border-radius:1rem;margin:0 auto 1rem;" />
+        <div style="color:white;font-size:1.25rem;font-weight:700;margin-bottom:0.5rem">Καλώς ήρθατε στο GearLog</div>
+        <div style="color:#94a3b8;font-size:0.8125rem;margin-bottom:1.5rem;line-height:1.6">Εισάγετε τον κωδικό ενεργοποίησης που σας έδωσε ο πάροχος για να ξεκινήσετε.</div>
+        <input id="act-code" type="text" placeholder="π.χ. GL-A3B7-X9K2"
+          style="width:100%;box-sizing:border-box;background:#0f172a;border:1.5px solid #475569;border-radius:0.5rem;color:white;padding:0.75rem 1rem;font-size:1rem;font-family:monospace;text-transform:uppercase;letter-spacing:0.05em;text-align:center;outline:none;margin-bottom:0.5rem;"
+          oninput="this.value=this.value.toUpperCase()" />
+        <div id="act-err" style="color:#f87171;font-size:0.8125rem;min-height:1.2rem;margin-bottom:0.75rem;"></div>
+        <button id="act-submit" style="width:100%;background:#1d4ed8;color:white;padding:0.75rem;border-radius:0.5rem;border:none;font-size:0.9375rem;font-weight:600;cursor:pointer;margin-bottom:0.625rem;">
+          Ενεργοποίηση
+        </button>
+        <button id="act-demo" style="width:100%;background:transparent;color:#94a3b8;border:1px solid #334155;padding:0.625rem;border-radius:0.5rem;font-size:0.8125rem;cursor:pointer;">
+          Δοκιμάστε το Demo
+        </button>
+      </div>
+    `;
+    document.body.appendChild(el);
+
+    const codeInput = el.querySelector('#act-code');
+    const errEl = el.querySelector('#act-err');
+    const submitBtn = el.querySelector('#act-submit');
+    const demoBtn = el.querySelector('#act-demo');
+
+    async function tryActivate() {
+      const code = (codeInput.value || '').trim().toUpperCase();
+      if (!code) { errEl.textContent = 'Εισάγετε τον κωδικό ενεργοποίησης.'; return; }
+      submitBtn.disabled = true;
+      submitBtn.textContent = '…';
+      errEl.textContent = '';
+      try {
+        const resp = await fetch(`/api/license-check?workshopId=${encodeURIComponent(code)}`);
+        const data = await resp.json();
+        if (!data.registered) {
+          errEl.textContent = 'Ο κωδικός δεν βρέθηκε. Ελέγξτε και δοκιμάστε ξανά.';
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Ενεργοποίηση';
+          return;
+        }
+        if (data.active === false) {
+          errEl.textContent = 'Ο λογαριασμός αυτός έχει ανασταλεί. Επικοινωνήστε με τον πάροχο.';
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Ενεργοποίηση';
+          return;
+        }
+        await DB.setSetting('workshopId', code);
+        state.settings.workshopId = code;
+        if (data.superadmin) {
+          await DB.setSetting('workshopMode', 'admin');
+          localStorage.setItem(LIC_CACHE_KEY, JSON.stringify({ ts: Date.now(), active: true, data: { active: true, registered: true } }));
+          el.remove();
+          updateSANavLink(true);
+          location.hash = '#/superadmin';
+        } else {
+          await DB.setSetting('workshopMode', 'licensed');
+          localStorage.setItem(LIC_CACHE_KEY, JSON.stringify({ ts: Date.now(), active: true, data }));
+          el.remove();
+          applyLicenseStatus(data);
+        }
+      } catch (_) {
+        errEl.textContent = 'Σφάλμα σύνδεσης. Ελέγξτε το internet σας.';
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Ενεργοποίηση';
+      }
+    }
+
+    submitBtn.addEventListener('click', tryActivate);
+    codeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') tryActivate(); });
+    demoBtn.addEventListener('click', async () => {
+      // Defense in depth: this screen shouldn't be reachable while already licensed (the
+      // /activate route redirects away), but guard the destructive action itself too.
+      if (state.settings.workshopId && state.settings.workshopMode !== 'demo') {
+        if (!confirm('Έχετε ήδη ενεργοποιημένο λογαριασμό. Η εκκίνηση demo θα αντικαταστήσει την πρόσβαση στα δεδομένα σας. Συνέχεια;')) return;
+      }
+      demoBtn.disabled = true;
+      demoBtn.textContent = 'Φόρτωση demo…';
+      const localId = 'ws_demo_' + Date.now().toString(36);
+      await DB.setSetting('workshopId', localId);
+      await DB.setSetting('workshopMode', 'demo');
+      state.settings.workshopId = localId;
+      state.settings.workshopMode = 'demo';
+      await seedDemoData();
+      await loadAll();
+      el.remove();
+      showDemoBanner();
+      router();
+    });
+  }
+
+  function showDemoBanner() {
+    if (document.getElementById('demo-banner')) return;
+    const el = document.createElement('div');
+    el.id = 'demo-banner';
+    el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9990;background:#1e3a5f;border-bottom:2px solid #3b82f6;padding:0.5rem 1rem;display:flex;align-items:center;gap:0.75rem;';
+    el.innerHTML = `
+      <span style="font-size:1rem;flex-shrink:0">🔍</span>
+      <span style="flex:1;font-size:0.8rem;color:#93c5fd;">Λειτουργία Demo — 3 δωρεάν καταχωρήσεις. <a href="#/contact" style="color:#60a5fa;text-decoration:underline;font-weight:600;">Ενεργοποίηση</a> για απεριόριστη χρήση.</span>
+    `;
+    document.body.appendChild(el);
+  }
+
+  async function seedDemoData() {
+    const t0 = new Date();
+    function ago(days) {
+      const d = new Date(t0);
+      d.setDate(d.getDate() - days);
+      return d.toISOString().slice(0, 10);
+    }
+
+    await DB.setSetting('workshopName', 'Συνεργείο Παπαδόπουλος');
+    await DB.setSetting('workshopPhone', '210 1234567');
+    await DB.setSetting('workshopAddress', 'Λεωφ. Κηφισίας 45, Αθήνα');
+    await DB.setSetting('laborRate', 40);
+    await DB.setSetting('intervalKm', 10000);
+    await DB.setSetting('intervalMonths', 12);
+    await DB.setSetting('workshopVehicleTypes', 'car,moto');
+    await DB.setSetting('workshopMechanics', JSON.stringify(['Νίκος', 'Κώστας']));
+
+    const customers = [
+      { id: 'demo-c1', name: 'Γεώργιος Παπαδόπουλος', phone: '6901234567', email: 'g.papadopoulos@email.gr' },
+      { id: 'demo-c2', name: 'Μαρία Αντωνίου', phone: '6912345678', email: 'm.antoniou@email.gr' },
+      { id: 'demo-c3', name: 'Νικόλαος Κωνσταντίνου', phone: '6923456789' },
+      { id: 'demo-c4', name: 'Ελένη Σταθοπούλου', phone: '6934567890', email: 'e.stathopoulou@email.gr' },
+      { id: 'demo-c5', name: 'Κωνσταντίνος Δημητρίου', phone: '6945678901' },
+    ];
+
+    const vehicles = [
+      { id: 'demo-v1', customerId: 'demo-c1', brand: 'Toyota', model: 'Yaris', year: '2019', plate: 'ΑΑΑ-1234', fuel: 'petrol', type: 'car', engine: '1000', color: 'Λευκό', mileage: 52000 },
+      { id: 'demo-v2', customerId: 'demo-c1', brand: 'Volkswagen', model: 'Golf', year: '2017', plate: 'ΒΒΒ-2345', fuel: 'diesel', type: 'car', engine: '1600', color: 'Γκρι', mileage: 98000 },
+      { id: 'demo-v3', customerId: 'demo-c2', brand: 'Hyundai', model: 'Tucson', year: '2021', plate: 'ΓΓΓ-3456', fuel: 'petrol', type: 'car', engine: '1600', color: 'Ασημί', mileage: 35000 },
+      { id: 'demo-v4', customerId: 'demo-c3', brand: 'Skoda', model: 'Octavia', year: '2019', plate: 'ΔΔΔ-4567', fuel: 'petrol', type: 'car', engine: '1400', color: 'Ασημί', mileage: 55000 },
+      { id: 'demo-v5', customerId: 'demo-c4', brand: 'Renault', model: 'Clio', year: '2018', plate: 'ΕΕΕ-5678', fuel: 'petrol', type: 'car', engine: '900', color: 'Κόκκινο', mileage: 67000 },
+      { id: 'demo-v6', customerId: 'demo-c5', brand: 'Ford', model: 'Focus', year: '2016', plate: 'ΖΖΖ-6789', fuel: 'diesel', type: 'car', engine: '1600', color: 'Μπλε', mileage: 115000 },
+      { id: 'demo-v7', customerId: 'demo-c4', brand: 'Honda', model: 'CB500F', year: '2020', plate: 'ΗΗΗ-7890', fuel: 'petrol', type: 'moto', engine: '471', color: 'Κόκκινο', mileage: 18000 },
+    ];
+
+    const services = [
+      { id: 'demo-s1',  vehicleId: 'demo-v1', date: ago(320), mileage: 42000, type: 'Αλλαγή λαδιού', description: 'Αλλαγή λαδιού 5W-30 & φίλτρου λαδιού. Τακτικός έλεγχος υγρών.', cost: 85,  mechanic: 'Νίκος',  nextServiceDate: ago(45),   nextServiceMileage: 52000 },
+      { id: 'demo-s2',  vehicleId: 'demo-v1', date: ago(200), mileage: 46500, type: 'Service 46.000 km', description: 'Λάδι 5W-30, φίλτρα αέρα / καυσίμου / cabin, μπουζί NGK.', cost: 215, mechanic: 'Νίκος',  nextServiceDate: ago(-145), nextServiceMileage: 56500 },
+      { id: 'demo-s3',  vehicleId: 'demo-v1', date: ago(40),  mileage: 51200, type: 'Αλλαγή λαδιού', description: 'Λάδι 0W-20 FS, φίλτρο λαδιού, αντιψυκτικό TOP-UP.', cost: 95,  mechanic: 'Κώστας', nextServiceDate: ago(-325), nextServiceMileage: 61200 },
+      { id: 'demo-s4',  vehicleId: 'demo-v2', date: ago(280), mileage: 88000, type: 'Αλλαγή λαδιού', description: 'Λάδι 5W-40 diesel & φίλτρο λαδιού. Έλεγχος τακακιών.', cost: 95,  mechanic: 'Κώστας', nextServiceDate: ago(75),   nextServiceMileage: 98000 },
+      { id: 'demo-s5',  vehicleId: 'demo-v2', date: ago(115), mileage: 93500, type: 'Φρένα', description: 'Τακάκια εμπρός/πίσω Brembo, δίσκοι εμπρός, υγρό φρένων Dot4.', cost: 380, mechanic: 'Νίκος',  nextServiceDate: ago(-250), nextServiceMileage: 103500 },
+      { id: 'demo-s6',  vehicleId: 'demo-v2', date: ago(18),  mileage: 97200, type: 'Full Service', description: 'Λάδι 5W-40, φίλτρα αέρα/καυσίμου/cabin/λαδιού, ζώνη poly-V.', cost: 290, mechanic: 'Νίκος',  nextServiceDate: ago(-347), nextServiceMileage: 107200 },
+      { id: 'demo-s7',  vehicleId: 'demo-v3', date: ago(175), mileage: 28000, type: 'Αλλαγή λαδιού', description: 'Λάδι 5W-30 FS & φίλτρο. Έλεγχος φωτεινής σήμανσης.', cost: 90,  mechanic: 'Κώστας', nextServiceDate: ago(10),   nextServiceMileage: 38000 },
+      { id: 'demo-s8',  vehicleId: 'demo-v3', date: ago(55),  mileage: 33000, type: 'Service', description: 'Φίλτρο αέρα, cabin filter, πλακέτες εμπρός, αέρας ελαστικών.', cost: 145, mechanic: 'Νίκος',  nextServiceDate: ago(-295), nextServiceMileage: 43000 },
+      { id: 'demo-s9',  vehicleId: 'demo-v4', date: ago(245), mileage: 45000, type: 'Αλλαγή λαδιού', description: 'Λάδι 5W-30 Longlife FS, φίλτρο λαδιού, έλεγχος υγρών & φωτεινών.', cost: 95,  mechanic: 'Νίκος',  nextServiceDate: ago(20),   nextServiceMileage: 55000 },
+      { id: 'demo-s10', vehicleId: 'demo-v4', date: ago(55),  mileage: 53500, type: 'Full Service', description: 'Λάδι 5W-30 FS, φίλτρα αέρα/cabin/καυσίμου/λαδιού, μπουζί NGK, έλεγχος ανάρτησης.', cost: 280, mechanic: 'Νίκος',  nextServiceDate: ago(-310), nextServiceMileage: 63500 },
+      { id: 'demo-s11', vehicleId: 'demo-v5', date: ago(295), mileage: 59000, type: 'Αλλαγή λαδιού', description: 'Λάδι 5W-40 & φίλτρο λαδιού Renault OE.', cost: 80,  mechanic: 'Κώστας', nextServiceDate: ago(70),   nextServiceMileage: 69000 },
+      { id: 'demo-s12', vehicleId: 'demo-v5', date: ago(135), mileage: 63000, type: 'Χρονισμός', description: 'Ιμάντας χρονισμού, τεντωτήρας, τροχαλία, αντλία νερού Continental.', cost: 520, mechanic: 'Νίκος',  nextServiceDate: ago(-230), nextServiceMileage: 93000 },
+      { id: 'demo-s13', vehicleId: 'demo-v5', date: ago(10),  mileage: 67000, type: 'Αλλαγή λαδιού', description: 'Λάδι 5W-40, φίλτρο λαδιού, cabin filter, αντιψυκτικό.', cost: 105, mechanic: 'Κώστας', nextServiceDate: ago(-355), nextServiceMileage: 77000 },
+      { id: 'demo-s14', vehicleId: 'demo-v6', date: ago(265), mileage: 108000, type: 'Full Service', description: 'Λάδι 5W-30 C3, φίλτρα αέρα/καυσίμου/λαδιού, ζώνη Bosch.', cost: 200, mechanic: 'Κώστας', nextServiceDate: ago(100),  nextServiceMileage: 118000 },
+      { id: 'demo-s15', vehicleId: 'demo-v6', date: ago(45),  mileage: 113000, type: 'Αλλαγή λαδιού', description: 'Λάδι 5W-30 C3 & φίλτρο λαδιού Mahle.', cost: 98,  mechanic: 'Νίκος',  nextServiceDate: ago(-320), nextServiceMileage: 123000 },
+      { id: 'demo-s16', vehicleId: 'demo-v7', date: ago(200), mileage: 14000, type: 'Service μοτοσυκλέτας', description: 'Λάδι 10W-40, φίλτρο λαδιού, αλυσίδα/γράνα, βαλβίδες.', cost: 125, mechanic: 'Νίκος',  nextServiceDate: ago(-165), nextServiceMileage: 20000 },
+      { id: 'demo-s17', vehicleId: 'demo-v7', date: ago(50),  mileage: 17500, type: 'Service μοτοσυκλέτας', description: 'Λάδι, φίλτρο αέρα, μπουζί NGK Iridium, ρύθμιση αλυσίδας.', cost: 95,  mechanic: 'Κώστας', nextServiceDate: ago(-315), nextServiceMileage: 24000 },
+    ];
+
+    const jobOrders = [
+      { id: 'demo-j1', vehicleId: 'demo-v1', status: 'in_progress', date: ago(2),  tasks: ['oil_change','oil_filter','air_filter','cabin_filter'], description: 'Τακτικό service 52.000 km', estimatedCost: 160, mechanic: 'Νίκος' },
+      { id: 'demo-j2', vehicleId: 'demo-v4', status: 'pending',     date: ago(1),  tasks: ['brake_pads_front','brake_discs_front','brake_fluid'],    description: 'Τριγμός φρένων εμπρός — αντικατάσταση τακακιών & δίσκων Skoda', estimatedCost: 240, mechanic: 'Κώστας' },
+      { id: 'demo-j3', vehicleId: 'demo-v6', status: 'completed',   date: ago(9), completedDate: ago(7), tasks: ['oil_change','oil_filter','fuel_filter','air_filter'], description: 'Full service diesel', estimatedCost: 200, actualCost: 200, mechanic: 'Νίκος' },
+    ];
+
+    for (const c of customers) await DB.add('customers', c);
+    for (const v of vehicles)   await DB.add('vehicles', v);
+    for (const s of services)   await DB.add('services', s);
+    for (const j of jobOrders)  await DB.add('job_orders', j);
+  }
+
+  function updateSANavLink(show) {
+    const link = document.getElementById('sa-nav-link');
+    if (!link) return;
+    link.classList.toggle('hidden', !show);
+    link.classList.toggle('flex', show);
+    if (show && window.lucide) lucide.createIcons();
+  }
+
+  function renderContact() {
+    $('#view').innerHTML = `
+      <div class="min-h-screen flex items-center justify-center px-4 py-12 pb-28 sm:pb-12">
+        <div class="w-full max-w-sm space-y-6">
+
+          <div class="text-center">
+            <div class="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
+              ${icon('phone-call','w-8 h-8 text-white')}
+            </div>
+            <h1 class="text-2xl font-bold text-slate-900 dark:text-white">Ενεργοποίηση GearLog</h1>
+            <p class="text-slate-500 dark:text-slate-400 text-sm mt-2">Επικοινωνήστε μαζί μας για να ξεκινήσετε τη συνδρομή σας και να λάβετε τον κωδικό ενεργοποίησης.</p>
+          </div>
+
+          <div class="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-700 shadow-sm overflow-hidden">
+            <div class="p-4 flex items-center gap-4">
+              <div class="w-10 h-10 rounded-xl bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center flex-shrink-0 text-indigo-600 dark:text-indigo-400">
+                ${icon('user','w-5 h-5')}
+              </div>
+              <div>
+                <div class="text-xs text-slate-400 dark:text-slate-500">Πάροχος</div>
+                <div class="font-semibold text-slate-900 dark:text-white text-sm">Αλέξανδρος Χατζηθεοδώρου</div>
+              </div>
+            </div>
+            <a href="mailto:al.chatzitheodorou@gmail.com" class="p-4 flex items-center gap-4 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+              <div class="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0 text-blue-600 dark:text-blue-400">
+                ${icon('mail','w-5 h-5')}
+              </div>
+              <div>
+                <div class="text-xs text-slate-400 dark:text-slate-500">Email</div>
+                <div class="font-medium text-blue-600 dark:text-blue-400 text-sm">al.chatzitheodorou@gmail.com</div>
+              </div>
+              ${icon('chevron-right','w-4 h-4 text-slate-400 ml-auto')}
+            </a>
+            <a href="tel:+306982940193" class="p-4 flex items-center gap-4 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+              <div class="w-10 h-10 rounded-xl bg-green-100 dark:bg-green-900/30 flex items-center justify-center flex-shrink-0 text-green-600 dark:text-green-400">
+                ${icon('phone','w-5 h-5')}
+              </div>
+              <div>
+                <div class="text-xs text-slate-400 dark:text-slate-500">Κινητό</div>
+                <div class="font-medium text-green-600 dark:text-green-400 text-sm">698 294 0193</div>
+              </div>
+              ${icon('chevron-right','w-4 h-4 text-slate-400 ml-auto')}
+            </a>
+          </div>
+
+          <a href="https://wa.me/306982940193?text=${encodeURIComponent('Γεια σας, ενδιαφέρομαι για την ενεργοποίηση του GearLog.')}" target="_blank"
+            class="w-full flex items-center justify-center gap-2 bg-green-500 hover:bg-green-600 text-white font-semibold py-3 rounded-xl transition-colors shadow-sm">
+            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+            Μήνυμα WhatsApp
+          </a>
+
+          <p class="text-center text-xs text-slate-400 dark:text-slate-500">
+            Μόλις λάβετε τον κωδικό ενεργοποίησης, <a href="#/activate" class="text-blue-500 underline font-medium">επιστρέψτε εδώ</a> για να τον εισάγετε.
+          </p>
+        </div>
+      </div>
+    `;
+    refreshIcons();
+  }
+
+  const LIC_CACHE_KEY = 'lic_last_check';
+  const LIC_GRACE_MS = 3 * 24 * 3600000; // 3 days
+
+  async function checkLicenseStatus() {
+    await loadAll();
+    const workshopId = state.settings.workshopId;
+
+    // Show SA nav link only for super admin
+    updateSANavLink(state.settings.workshopMode === 'admin');
+
+    // New installation — show activation screen
+    if (!workshopId) {
+      showActivationScreen();
+      return;
+    }
+
+    // Demo mode — show persistent banner reminder, seed data on first visit
+    if (state.settings.workshopMode === 'demo') {
+      if (state.customers.length === 0) {
+        await seedDemoData();
+        await loadAll();
+      }
+      showDemoBanner();
+      return;
+    }
+
+    try {
+      const resp = await fetch(`/api/license-check?workshopId=${encodeURIComponent(workshopId)}`);
+      const data = await resp.json();
+
+      // Persist the result only when it comes from the server
+      if (data.registered !== false && data.configured !== false) {
+        localStorage.setItem(LIC_CACHE_KEY, JSON.stringify({ ts: Date.now(), active: data.active, data }));
+      }
+
+      // If server says inactive, lock immediately and wipe the "grace" cache
+      if (data.active === false) {
+        localStorage.setItem(LIC_CACHE_KEY, JSON.stringify({ ts: Date.now(), active: false, data }));
+      }
+
+      applyLicenseStatus(data);
+    } catch (_) {
+      // Offline or server error — apply grace period logic
+      applyOfflineGrace();
+    }
+  }
+
+  function applyOfflineGrace() {
+    const raw = localStorage.getItem(LIC_CACHE_KEY);
+    if (!raw) return; // Never registered → fail open
+
+    try {
+      const { ts, active, data } = JSON.parse(raw);
+
+      if (active === false) {
+        // Was already locked before going offline → keep locked
+        applyLicenseStatus(data || { active: false });
+        return;
+      }
+
+      const ageMs = Date.now() - ts;
+      if (ageMs > LIC_GRACE_MS) {
+        // Grace period expired → lock with "needs internet" message
+        showOfflineLock(Math.ceil(ageMs / 86400000));
+      }
+      // else: within grace period → allow (do nothing)
+    } catch (_) {}
+  }
+
+  function showOfflineLock(offlineDays) {
+    document.getElementById('license-overlay')?.remove();
+    const el = document.createElement('div');
+    el.id = 'license-overlay';
+    el.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#0f172a;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:1.25rem;padding:2rem;text-align:center;';
+    el.innerHTML = `
+      <div style="width:64px;height:64px;background:#f59e0b;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:2rem">📡</div>
+      <div style="color:white;font-size:1.25rem;font-weight:700">Απαιτείται σύνδεση internet</div>
+      <div style="color:#94a3b8;font-size:0.875rem;max-width:320px;line-height:1.6">Η εφαρμογή δεν έχει επαληθεύσει τη συνδρομή σας για ${offlineDays} ημέρες. Συνδεθείτε στο internet για να συνεχίσετε.</div>
+      <button onclick="location.reload()" style="background:#1d4ed8;color:white;padding:0.625rem 1.5rem;border-radius:0.5rem;border:none;font-size:0.875rem;font-weight:600;cursor:pointer">Δοκιμή ξανά</button>
+    `;
+    document.body.appendChild(el);
+  }
+
+  function applyLicenseStatus(data) {
+    document.getElementById('license-overlay')?.remove();
+    document.getElementById('payment-banner')?.remove();
+
+    if (data.active === false) {
+      const el = document.createElement('div');
+      el.id = 'license-overlay';
+      el.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#0f172a;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:1.25rem;padding:2rem;text-align:center;';
+      el.innerHTML = `
+        <div style="width:64px;height:64px;background:#ef4444;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:2rem">🔒</div>
+        <div style="color:white;font-size:1.25rem;font-weight:700">Η πρόσβαση έχει ανασταλεί</div>
+        <div style="color:#94a3b8;font-size:0.875rem;max-width:320px;line-height:1.6">Η συνδρομή σας έχει λήξει ή ανασταλεί. Επικοινωνήστε με τον πάροχο για να ενεργοποιηθεί ξανά η πρόσβαση.</div>
+        ${data.workshopName ? `<div style="color:#475569;font-size:0.75rem">Συνεργείο: ${U.escape(data.workshopName)}</div>` : ''}
+      `;
+      document.body.appendChild(el);
+      return;
+    }
+
+    if (data.registered && data.daysUntilPayment !== null && data.daysUntilPayment <= 5) {
+      const days = data.daysUntilPayment;
+      const feeStr = data.monthlyFee
+        ? ` — ${Number(data.monthlyFee).toLocaleString('el-GR', { style: 'currency', currency: 'EUR' })}`
+        : '';
+      const msg = days === 0
+        ? `Σήμερα είναι η ημέρα πληρωμής της συνδρομής σας${feeStr}!`
+        : `Η πληρωμή συνδρομής λήγει σε ${days} ${days === 1 ? 'ημέρα' : 'ημέρες'}${feeStr}.`;
+
+      const el = document.createElement('div');
+      el.id = 'payment-banner';
+      el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9998;background:#fef3c7;border-bottom:2px solid #f59e0b;padding:0.625rem 1rem;display:flex;align-items:center;gap:0.75rem;';
+      el.innerHTML = `
+        <span style="font-size:1.1rem;flex-shrink:0">⚠️</span>
+        <span style="flex:1;font-size:0.8125rem;font-weight:600;color:#78350f">${msg} Επικοινωνήστε με τον πάροχο.</span>
+        <button onclick="document.getElementById('payment-banner').remove()" style="flex-shrink:0;padding:0.25rem 0.625rem;font-size:0.8rem;color:#92400e;font-weight:700;border-radius:0.375rem;border:1px solid #f59e0b;background:transparent;cursor:pointer">✕</button>
+      `;
+      document.body.appendChild(el);
+    }
+  }
+
+  // =========================================================
+  //  SUPER ADMIN
+  // =========================================================
+  async function renderSuperAdmin() {
+    $('#view').innerHTML = `
+      ${pageHeader('Super Admin')}
+      <div class="max-w-3xl mx-auto p-4 pb-24 sm:pb-4">
+        <div id="sa-content">
+          <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6 max-w-sm mx-auto mt-8">
+            <div class="flex flex-col items-center gap-3 mb-6">
+              <div class="w-14 h-14 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center">${icon('shield','w-7 h-7 text-blue-600')}</div>
+              <h2 class="font-bold text-lg">Σύνδεση Super Admin</h2>
+              <p class="text-xs text-slate-500 dark:text-slate-400 text-center">Εισάγετε το PIN διαχειριστή για να συνεχίσετε.</p>
+            </div>
+            <div class="space-y-3">
+              <input id="sa-pin" type="password" inputmode="text" placeholder="Κωδικός PIN"
+                class="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 text-center text-lg tracking-widest" />
+              <div id="sa-pin-err" class="hidden text-red-500 text-sm text-center"></div>
+              <button id="sa-login" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 rounded-lg">
+                ${icon('log-in','w-4 h-4 inline mr-1')} Είσοδος
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    refreshIcons();
+
+    let adminPin = null;
+
+    async function saLogin() {
+      const pin = ($('#sa-pin').value || '').trim();
+      if (!pin) return;
+      const btn = $('#sa-login');
+      btn.disabled = true;
+      btn.textContent = '…';
+      $('#sa-pin-err').classList.add('hidden');
+      try {
+        const resp = await fetch('/api/admin-clients', { headers: { 'x-admin-pin': pin } });
+        if (resp.status === 401) {
+          $('#sa-pin-err').textContent = 'Λάθος PIN. Δοκιμάστε ξανά.';
+          $('#sa-pin-err').classList.remove('hidden');
+          btn.disabled = false;
+          btn.innerHTML = `${icon('log-in','w-4 h-4 inline mr-1')} Είσοδος`;
+          refreshIcons();
+          return;
+        }
+        if (!resp.ok) {
+          $('#sa-pin-err').textContent = 'Σφάλμα σύνδεσης. Ελέγξτε τις ρυθμίσεις διακομιστή.';
+          $('#sa-pin-err').classList.remove('hidden');
+          btn.disabled = false;
+          btn.innerHTML = `${icon('log-in','w-4 h-4 inline mr-1')} Είσοδος`;
+          refreshIcons();
+          return;
+        }
+        adminPin = pin;
+        const clients = await resp.json();
+        renderAdminDashboard(clients);
+      } catch (e) {
+        $('#sa-pin-err').textContent = 'Σφάλμα σύνδεσης.';
+        $('#sa-pin-err').classList.remove('hidden');
+        btn.disabled = false;
+        btn.innerHTML = `${icon('log-in','w-4 h-4 inline mr-1')} Είσοδος`;
+        refreshIcons();
+      }
+    }
+
+    $('#sa-login').addEventListener('click', saLogin);
+    $('#sa-pin').addEventListener('keydown', (e) => { if (e.key === 'Enter') saLogin(); });
+
+    async function loadClients() {
+      const resp = await fetch('/api/admin-clients', { headers: { 'x-admin-pin': adminPin } });
+      return resp.ok ? resp.json() : [];
+    }
+
+    function clientDaysUntilPayment(paymentDay) {
+      if (!paymentDay) return null;
+      const today = new Date();
+      let pd = new Date(today.getFullYear(), today.getMonth(), paymentDay);
+      if (pd < today) pd = new Date(today.getFullYear(), today.getMonth() + 1, paymentDay);
+      return Math.ceil((pd - today) / 86400000);
+    }
+
+    function renderAdminDashboard(clients) {
+      const content = $('#sa-content');
+      const today = new Date();
+      content.innerHTML = `
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-bold">Πελάτες (${clients.length})</h2>
+          <button id="sa-add-btn" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center gap-1">
+            ${icon('plus','w-4 h-4')} Νέος πελάτης
+          </button>
+        </div>
+
+        <div id="sa-client-list" class="space-y-3 mb-6">
+          ${clients.length === 0 ? `<div class="text-center py-12 text-slate-400">Δεν υπάρχουν πελάτες ακόμα. Προσθέστε τον πρώτο!</div>` : clients.map((c) => {
+            const days = clientDaysUntilPayment(c.payment_day);
+            const dueSoon = days !== null && days <= 5;
+            const isInactive = !c.is_active;
+            return `
+            <div class="bg-white dark:bg-slate-800 rounded-xl border ${isInactive ? 'border-red-200 dark:border-red-900/50' : dueSoon ? 'border-amber-300 dark:border-amber-600/50' : 'border-slate-200 dark:border-slate-700'} p-4">
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span class="font-semibold text-sm">${U.escape(c.workshop_name)}</span>
+                    <span class="text-xs px-1.5 py-0.5 rounded-full font-medium ${isInactive ? 'bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400' : 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/40 dark:text-emerald-400'}">
+                      ${isInactive ? 'Ανενεργό' : 'Ενεργό'}
+                    </span>
+                    ${dueSoon && !isInactive ? `<span class="text-xs px-1.5 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400">
+                      ${days === 0 ? 'Πληρωμή σήμερα' : `Πληρωμή σε ${days}μ`}
+                    </span>` : ''}
+                  </div>
+                  <div class="text-xs text-slate-500 dark:text-slate-400 mt-1 space-y-0.5">
+                    ${c.contact_name ? `<div>${U.escape(c.contact_name)}</div>` : ''}
+                    ${c.email ? `<div>${U.escape(c.email)}</div>` : ''}
+                    ${c.phone ? `<div>${U.escape(c.phone)}</div>` : ''}
+                    ${c.monthly_fee ? `<div class="font-medium text-slate-600 dark:text-slate-300">${Number(c.monthly_fee).toLocaleString('el-GR',{style:'currency',currency:'EUR'})}/μήνα · ημέρα ${c.payment_day}</div>` : ''}
+                  </div>
+                  ${c.workshop_id ? `
+                  <div class="mt-2 pt-2 border-t border-slate-100 dark:border-slate-700">
+                    <div class="text-[10px] text-slate-400 mb-1">Κωδικός Ενεργοποίησης</div>
+                    <div class="flex items-center gap-2">
+                      <span class="font-mono text-sm font-bold tracking-widest text-blue-600 dark:text-blue-400">${U.escape(c.workshop_id)}</span>
+                      <button data-wid="${U.escape(c.workshop_id)}" class="sa-copy-wid text-[10px] px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-600 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700">${icon('copy','w-3 h-3 inline')} Αντιγραφή</button>
+                    </div>
+                  </div>` : ''}
+                </div>
+                <div class="flex flex-col gap-1.5 flex-shrink-0">
+                  <button data-cid="${U.escape(c.id)}" data-active="${c.is_active ? '1' : '0'}" class="sa-toggle text-xs font-medium px-2.5 py-1.5 rounded-lg border transition-colors ${isInactive ? 'bg-emerald-500 hover:bg-emerald-600 text-white border-emerald-500' : 'bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40 text-red-600 dark:text-red-400 border-red-200 dark:border-red-900/50'}">
+                    ${isInactive ? icon('check','w-3.5 h-3.5 inline') + ' Ενεργοποίηση' : icon('ban','w-3.5 h-3.5 inline') + ' Απενεργοποίηση'}
+                  </button>
+                  <button data-cid="${U.escape(c.id)}" class="sa-edit text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50 text-slate-600 dark:text-slate-300">
+                    ${icon('pencil','w-3.5 h-3.5 inline')} Επεξεργασία
+                  </button>
+                </div>
+              </div>
+              ${c.notes ? `<div class="mt-2 text-xs text-slate-400 italic border-t border-slate-100 dark:border-slate-700 pt-2">${U.escape(c.notes)}</div>` : ''}
+            </div>`;
+          }).join('')}
+        </div>
+
+        <div id="sa-form-wrap" class="hidden bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-3">
+          <h3 id="sa-form-title" class="font-semibold">Νέος Πελάτης</h3>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div><label class="block text-sm font-medium mb-1">Όνομα Συνεργείου <span class="text-red-500">*</span></label>
+              <input id="sa-workshop-name" type="text" class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" /></div>
+            <div><label class="block text-sm font-medium mb-1">Υπεύθυνος</label>
+              <input id="sa-contact-name" type="text" class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" /></div>
+            <div><label class="block text-sm font-medium mb-1">Email</label>
+              <input id="sa-email" type="email" class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" /></div>
+            <div><label class="block text-sm font-medium mb-1">Τηλέφωνο</label>
+              <input id="sa-phone" type="tel" class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" /></div>
+            <div><label class="block text-sm font-medium mb-1">Μηνιαία Χρέωση (€)</label>
+              <input id="sa-fee" type="number" min="0" step="0.01" class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" /></div>
+            <div><label class="block text-sm font-medium mb-1">Ημέρα Πληρωμής (1-28)</label>
+              <input id="sa-payDay" type="number" min="1" max="28" class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" /></div>
+            <div class="sm:col-span-2"><label class="block text-sm font-medium mb-1">Workshop ID <span class="text-xs text-slate-400">(από τις Ρυθμίσεις της εφαρμογής τους)</span></label>
+              <input id="sa-wid" type="text" class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm font-mono" /></div>
+            <div class="sm:col-span-2"><label class="block text-sm font-medium mb-1">Σημειώσεις</label>
+              <textarea id="sa-notes" rows="2" class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"></textarea></div>
+          </div>
+          <div class="flex gap-2 pt-1">
+            <button id="sa-save" class="bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 py-2 rounded-lg text-sm">Αποθήκευση</button>
+            <button id="sa-cancel" class="bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-medium px-4 py-2 rounded-lg text-sm">Ακύρωση</button>
+          </div>
+        </div>
+      `;
+      refreshIcons();
+      wireAdminDashboard(clients);
+    }
+
+    function genActivationCode() {
+      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      const seg = (n) => Array.from({ length: n }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+      return `GL-${seg(4)}-${seg(4)}`;
+    }
+
+    function showForm(client) {
+      const wrap = $('#sa-form-wrap');
+      $('#sa-form-title').textContent = client ? 'Επεξεργασία Πελάτη' : 'Νέος Πελάτης';
+      $('#sa-workshop-name').value = client?.workshop_name || '';
+      $('#sa-contact-name').value = client?.contact_name || '';
+      $('#sa-email').value = client?.email || '';
+      $('#sa-phone').value = client?.phone || '';
+      $('#sa-fee').value = client?.monthly_fee || '';
+      $('#sa-payDay').value = client?.payment_day || '';
+      $('#sa-wid').value = client?.workshop_id || genActivationCode();
+      $('#sa-notes').value = client?.notes || '';
+      wrap.dataset.editId = client?.id || '';
+      wrap.classList.remove('hidden');
+      wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function wireAdminDashboard(clients) {
+      $('#sa-add-btn').addEventListener('click', () => showForm(null));
+      $('#sa-cancel').addEventListener('click', () => $('#sa-form-wrap').classList.add('hidden'));
+
+      $('#sa-save').addEventListener('click', async () => {
+        const workshopName = ($('#sa-workshop-name').value || '').trim();
+        if (!workshopName) { U.toast('Το όνομα συνεργείου είναι υποχρεωτικό', 'error'); return; }
+        const payload = {
+          workshop_name: workshopName,
+          contact_name: ($('#sa-contact-name').value || '').trim() || null,
+          email: ($('#sa-email').value || '').trim() || null,
+          phone: ($('#sa-phone').value || '').trim() || null,
+          monthly_fee: Number($('#sa-fee').value) || 0,
+          payment_day: Number($('#sa-payDay').value) || 1,
+          workshop_id: ($('#sa-wid').value || '').trim() || null,
+          notes: ($('#sa-notes').value || '').trim() || null,
+        };
+        const editId = $('#sa-form-wrap').dataset.editId;
+        try {
+          const url = '/api/admin-clients';
+          const method = editId ? 'PUT' : 'POST';
+          if (editId) payload.id = editId;
+          const resp = await fetch(url, { method, headers: { 'Content-Type': 'application/json', 'x-admin-pin': adminPin }, body: JSON.stringify(payload) });
+          if (!resp.ok) throw new Error(await resp.text());
+          U.toast('Αποθηκεύτηκε');
+          const updated = await loadClients();
+          renderAdminDashboard(updated);
+        } catch (e) {
+          U.toast(e.message || 'Σφάλμα αποθήκευσης', 'error');
+        }
+      });
+
+      $$('.sa-copy-wid').forEach((btn) => btn.addEventListener('click', () => {
+        navigator.clipboard.writeText(btn.dataset.wid).then(() => U.toast('Αντιγράφηκε!'));
+      }));
+
+      $$('.sa-toggle').forEach((btn) => btn.addEventListener('click', async () => {
+        const cid = btn.dataset.cid;
+        const currentlyActive = btn.dataset.active === '1';
+        const client = clients.find((c) => c.id === cid);
+        if (!client) return;
+        const confirmed = confirm(`${currentlyActive ? 'Απενεργοποίηση' : 'Ενεργοποίηση'} "${client.workshop_name}";`);
+        if (!confirmed) return;
+        try {
+          await fetch('/api/admin-clients', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', 'x-admin-pin': adminPin },
+            body: JSON.stringify({ id: cid, is_active: !currentlyActive }),
+          });
+          const updated = await loadClients();
+          renderAdminDashboard(updated);
+        } catch (e) {
+          U.toast('Σφάλμα ενημέρωσης', 'error');
+        }
+      }));
+
+      $$('.sa-edit').forEach((btn) => btn.addEventListener('click', () => {
+        const cid = btn.dataset.cid;
+        const client = clients.find((c) => c.id === cid);
+        if (client) showForm(client);
+      }));
     }
   }
 
@@ -3381,6 +6006,40 @@
         </div>
 
         <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-3">
+          <h2 class="font-semibold">Μηχανικοί</h2>
+          <p class="text-xs text-slate-500 dark:text-slate-400">Οι μηχανικοί του συνεργείου εμφανίζονται ως dropdown στις φόρμες service και εντολών.</p>
+          <div id="mechanics-list" class="space-y-2">
+            ${JSON.parse(s.workshopMechanics || '[]').map((m, i) => `
+              <div class="flex items-center gap-2">
+                <span class="flex-1 text-sm font-medium px-3 py-2 bg-slate-50 dark:bg-slate-700/50 rounded-lg">${U.escape(m)}</span>
+                <button type="button" data-mech-idx="${i}" class="mech-del p-2 text-red-400 hover:text-red-600 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20">${icon('trash-2','w-4 h-4')}</button>
+              </div>
+            `).join('')}
+          </div>
+          <div class="flex gap-2">
+            <input id="new-mechanic" type="text" placeholder="Όνομα μηχανικού" style="text-transform:uppercase"
+              oninput="this.value=this.value.toUpperCase()"
+              class="flex-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <button type="button" id="add-mechanic" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-1">
+              ${icon('plus','w-4 h-4')} Προσθήκη
+            </button>
+          </div>
+        </div>
+
+        <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-3">
+          <h2 class="font-semibold">Τύποι Οχημάτων</h2>
+          <p class="text-xs text-slate-500 dark:text-slate-400">Επιλέξτε με τι οχήματα ασχολείται το συνεργείο σας (χρησιμοποιείται από τον Σύμβουλο AI)</p>
+          <div class="grid grid-cols-2 gap-1">
+            ${[['car','Αυτοκίνητα','car'],['moto','Μοτοσυκλέτες','bike'],['truck','Φορτηγά','truck'],['boat','Σκάφη','ship']].map(([val,label,icn]) => `
+              <label class="flex items-center gap-2 p-2.5 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/30 cursor-pointer">
+                <input type="checkbox" id="vtype-${val}" ${(s.workshopVehicleTypes || 'car').includes(val) ? 'checked' : ''} class="w-4 h-4 rounded accent-blue-600" />
+                <span class="flex items-center gap-1.5 text-sm">${icon(icn,'w-4 h-4 text-slate-500')} ${label}</span>
+              </label>
+            `).join('')}
+          </div>
+        </div>
+
+        <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-3">
           <h2 class="font-semibold">${t('data_management')}</h2>
           <div class="grid grid-cols-2 gap-2">
             <button id="export-data" class="bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium px-3 py-2.5 rounded-lg flex items-center justify-center gap-1">${icon('download','w-4 h-4')} ${t('export_backup')}</button>
@@ -3396,6 +6055,35 @@
       </div>
     `;
 
+    // --- Mechanics management ---
+    window._settingsMechanics = JSON.parse(s.workshopMechanics || '[]');
+
+    function renderMechanicsList() {
+      const list = $('#mechanics-list');
+      if (!list) return;
+      list.innerHTML = window._settingsMechanics.map((m, i) => `
+        <div class="flex items-center gap-2">
+          <span class="flex-1 text-sm font-medium px-3 py-2 bg-slate-50 dark:bg-slate-700/50 rounded-lg">${U.escape(m)}</span>
+          <button type="button" data-mech-idx="${i}" class="mech-del p-2 text-red-400 hover:text-red-600 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20">${icon('trash-2','w-4 h-4')}</button>
+        </div>`).join('');
+      refreshIcons();
+      $$('.mech-del').forEach((btn) => btn.addEventListener('click', () => {
+        window._settingsMechanics.splice(Number(btn.dataset.mechIdx), 1);
+        renderMechanicsList();
+      }));
+    }
+
+    $('#add-mechanic').addEventListener('click', () => {
+      const inp = $('#new-mechanic');
+      const name = (inp.value || '').trim().toUpperCase();
+      if (!name) return;
+      window._settingsMechanics.push(name);
+      inp.value = '';
+      renderMechanicsList();
+    });
+    $('#new-mechanic').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('#add-mechanic').click(); } });
+    renderMechanicsList();
+
     $('#save-settings').addEventListener('click', async () => {
       const fields = ['workshopName','workshopPhone','workshopEmail','workshopAddress','workshopTaxId','laborRate','intervalKm','intervalMonths'];
       for (const f of fields) {
@@ -3407,6 +6095,9 @@
         }
       }
       await DB.setSetting('currency', $('#curr-sel').value);
+      const vtypes = ['car','moto','truck','boat'].filter((v) => $(`#vtype-${v}`)?.checked).join(',');
+      await DB.setSetting('workshopVehicleTypes', vtypes || 'car');
+      await DB.setSetting('workshopMechanics', JSON.stringify(window._settingsMechanics || JSON.parse(s.workshopMechanics || '[]')));
       localStorage.setItem('lang', $('#lang-sel').value);
       localStorage.setItem('theme', $('#theme-sel').value);
       localStorage.setItem('currency', $('#curr-sel').value);
@@ -3417,11 +6108,17 @@
 
     $('#export-data').addEventListener('click', async () => {
       const data = await DB.exportAll();
+      // Include localStorage preferences so they're restored on import
+      data._prefs = {
+        lang: localStorage.getItem('lang') || 'el',
+        theme: localStorage.getItem('theme') || 'light',
+        currency: localStorage.getItem('currency') || 'EUR',
+      };
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `synergeio-backup-${new Date().toISOString().slice(0,10)}.json`;
+      a.download = `gearlog-backup-${new Date().toISOString().slice(0,10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
     });
@@ -3429,15 +6126,29 @@
     $('#import-data').addEventListener('change', async (e) => {
       const file = e.target.files[0];
       if (!file) return;
-      if (!confirm('Θα αντικαταστήσει όλα τα δεδομένα. Συνέχεια;')) return;
       const text = await file.text();
+      let data;
+      try { data = JSON.parse(text); } catch (err) { U.toast('Μη έγκυρο αρχείο backup', 'error'); return; }
+      const counts = [
+        data.customers?.length ? `${data.customers.length} πελάτες` : null,
+        data.vehicles?.length ? `${data.vehicles.length} οχήματα` : null,
+        data.services?.length ? `${data.services.length} καταγραφές service` : null,
+        data.job_orders?.length ? `${data.job_orders.length} εντολές` : null,
+      ].filter(Boolean).join(', ');
+      const msg = `Θα αντικατασταθούν ΟΛΕΣ οι τρέχουσες εγγραφές με τα δεδομένα του backup${counts ? ' (' + counts + ')' : ''}.\n\nΣυνέχεια;`;
+      if (!confirm(msg)) return;
       try {
-        const data = JSON.parse(text);
         await DB.importAll(data);
-        U.toast(t('saved'));
-        setTimeout(() => location.reload(), 600);
+        // Restore localStorage preferences
+        if (data._prefs) {
+          if (data._prefs.lang) localStorage.setItem('lang', data._prefs.lang);
+          if (data._prefs.theme) localStorage.setItem('theme', data._prefs.theme);
+          if (data._prefs.currency) localStorage.setItem('currency', data._prefs.currency);
+        }
+        U.toast('Το backup επαναφέρθηκε επιτυχώς');
+        setTimeout(() => location.reload(), 800);
       } catch (err) {
-        U.toast(t('error_generic'), 'error');
+        U.toast('Σφάλμα κατά την εισαγωγή: ' + (err?.message || err), 'error');
       }
     });
 
@@ -3484,6 +6195,33 @@
         </div>
       </div>
     `;
+  }
+
+  function mechanicSelect(fieldName, currentValue) {
+    const mechanics = JSON.parse(state.settings.workshopMechanics || '[]');
+    if (!mechanics.length) {
+      return `
+        <div>
+          <label class="block text-sm font-medium mb-1">${t('service_mechanic')}</label>
+          <div class="flex gap-2">
+            <input id="ff-mechanic" name="${fieldName}" type="text" value="${U.escape((currentValue||'').toUpperCase())}"
+              oninput="this.value=this.value.toUpperCase()"
+              class="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            ${micBtn('ff-mechanic', { transform: 'name' })}
+          </div>
+          <p class="text-xs text-slate-400 mt-1">Πρόσθεσε μηχανικούς στις <a href="#/settings" class="underline">Ρυθμίσεις</a> για dropdown επιλογή.</p>
+        </div>`;
+    }
+    const opts = ['', ...mechanics].map((m) =>
+      `<option value="${U.escape(m)}" ${currentValue === m ? 'selected' : ''}>${m || '— Επιλογή μηχανικού —'}</option>`
+    ).join('');
+    return `
+      <div>
+        <label class="block text-sm font-medium mb-1">${t('service_mechanic')}</label>
+        <select name="${fieldName}" class="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500">
+          ${opts}
+        </select>
+      </div>`;
   }
 
   function settingsField(name, label, value, type, step) {
@@ -3535,6 +6273,114 @@
     const pref = localStorage.getItem('theme') || 'auto';
     const dark = pref === 'dark' || (pref === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
     document.documentElement.classList.toggle('dark', dark);
+    // color-scheme tells the browser (and mobile WebViews) which mode we want,
+    // preventing Android Chrome "Force Dark" from overriding our CSS
+    document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+  }
+
+  // =========================================================
+  //  Backup Reminder
+  // =========================================================
+  function checkBackupReminder() {
+    const BACKUP_KEY = 'lastBackupReminder';
+    const INTERVAL_DAYS = 15;
+    const last = Number(localStorage.getItem(BACKUP_KEY) || 0);
+    if (last === 0) {
+      // First launch ever — nothing to back up yet. Start the clock silently instead of
+      // showing a nonsensical "days since 1970" reminder.
+      localStorage.setItem(BACKUP_KEY, String(Date.now()));
+      return;
+    }
+    const daysSince = (Date.now() - last) / 86400000;
+    if (daysSince < INTERVAL_DAYS) return;
+
+    setTimeout(() => {
+      const overlay = document.createElement('div');
+      overlay.className = 'fixed inset-0 z-[999] flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-4';
+      overlay.innerHTML = `
+        <div class="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-sm shadow-2xl p-5 space-y-4">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/40 text-amber-600 flex items-center justify-center flex-shrink-0">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            </div>
+            <div>
+              <div class="font-bold text-base">Υπενθύμιση Backup</div>
+              <div class="text-xs text-slate-500 dark:text-slate-400">Ασφάλεια δεδομένων επιχείρησης</div>
+            </div>
+          </div>
+          <p class="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+            Έχουν περάσει <b>${Math.floor(daysSince) || 'μερικές'} ημέρες</b> από το τελευταίο backup.<br>
+            Κάνε εξαγωγή των δεδομένων σου για να προστατεύσεις το αρχείο της επιχείρησής σου.
+          </p>
+          <div class="space-y-2">
+            <button id="br-backup" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-semibold py-2.5 rounded-xl text-sm flex items-center justify-center gap-2 transition-colors">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Λήψη Backup τώρα
+            </button>
+            <button id="br-done" class="w-full bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 font-medium py-2.5 rounded-xl text-sm transition-colors">
+              Το έχω κάνει ήδη
+            </button>
+            <button id="br-later" class="w-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-sm py-1.5 transition-colors">
+              Υπενθύμηση σε 3 ημέρες
+            </button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+
+      overlay.querySelector('#br-backup').addEventListener('click', () => {
+        overlay.remove();
+        localStorage.setItem(BACKUP_KEY, String(Date.now()));
+        go('/settings?backup=1');
+      });
+
+      overlay.querySelector('#br-done').addEventListener('click', () => {
+        overlay.remove();
+        localStorage.setItem(BACKUP_KEY, String(Date.now()));
+      });
+
+      overlay.querySelector('#br-later').addEventListener('click', () => {
+        overlay.remove();
+        // Set timestamp 12 days ago so next check triggers in 3 days
+        localStorage.setItem(BACKUP_KEY, String(Date.now() - (12 * 86400000)));
+      });
+    }, 3000);
+  }
+
+  // =========================================================
+  //  ΚΤΕΟ / Emissions Alerts
+  // =========================================================
+  function checkKteoAlerts() {
+    const ALERT_KEY = 'lastKteoAlertDay';
+    const today = new Date().toDateString();
+    if (localStorage.getItem(ALERT_KEY) === today) return; // once per day
+
+    const kteoExpiring = state.vehicles.filter((v) => { const st = kteoStatus(v); return st && st.daysLeft >= 0 && st.daysLeft <= 14; });
+    const emExpiring = state.vehicles.filter((v) => { const st = emissionsStatus(v); return st && st.daysLeft >= 0 && st.daysLeft <= 14; });
+
+    const total = kteoExpiring.length + emExpiring.length;
+    if (!total) return;
+
+    localStorage.setItem(ALERT_KEY, today);
+
+    const lines = [];
+    if (kteoExpiring.length) lines.push(`🔵 ΚΤΕΟ: ${kteoExpiring.map((v) => v.plate || vehicleLabel(v)).join(', ')}`);
+    if (emExpiring.length) lines.push(`🟢 Καυσαέρια: ${emExpiring.map((v) => v.plate || vehicleLabel(v)).join(', ')}`);
+
+    setTimeout(() => {
+      openDialog('Ειδοποίηση ΚΤΕΟ / Καυσαερίων', `
+        <div class="space-y-3">
+          <div class="flex items-start gap-3 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl">
+            ${icon('shield-alert','w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5')}
+            <div class="text-sm text-amber-800 dark:text-amber-200">
+              <p class="font-semibold mb-1">${total} όχημα${total > 1 ? 'τα' : ''} λήγει${total > 1 ? 'ουν' : ''} εντός 2 εβδομάδων:</p>
+              ${lines.map((l) => `<p class="text-xs mt-0.5">${l}</p>`).join('')}
+            </div>
+          </div>
+          <p class="text-xs text-slate-500 text-center">Μεταβείτε στις Υπενθυμίσεις για να ειδοποιήσετε τους πελάτες.</p>
+          <a href="#/reminders" class="block bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2.5 rounded-lg text-center" onclick="closeDialog?.()">Προβολή Υπενθυμίσεων</a>
+        </div>
+      `);
+    }, 2500);
   }
 
   // =========================================================
@@ -3560,7 +6406,18 @@
     });
 
     window.addEventListener('hashchange', router);
-    router();
+    // Wait for the first render (which loads state.* from IndexedDB via loadAll())
+    // before running checks that read that state — otherwise they'd see empty arrays.
+    await router();
+
+    // License check (runs once per session, non-blocking)
+    checkLicenseStatus();
+
+    // Backup reminder (every 15 days)
+    checkBackupReminder();
+
+    // ΚΤΕΟ / emissions alerts (vehicles expiring within 14 days)
+    checkKteoAlerts();
 
     // Register service worker
     if ('serviceWorker' in navigator && location.protocol !== 'file:') {

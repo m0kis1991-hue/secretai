@@ -14,7 +14,7 @@ window.I18N = {
     nav_services: 'Service',
     nav_reminders: 'Υπενθυμίσεις',
     nav_settings: 'Ρυθμίσεις',
-    nav_scan: 'AI Σκανάρισμα',
+    nav_scan: 'Έξυπνο Σκανάρισμα',
     nav_parts: 'Ανταλλακτικά',
 
     // Generic
@@ -203,7 +203,7 @@ window.I18N = {
     anthropic_api_key_help: 'Χρησιμοποιείται για AI σκανάρισμα αδειών με Claude. Αποθηκεύεται μόνο στη συσκευή σου.',
 
     // AI Scan
-    ai_scan_title: 'AI Σκανάρισμα',
+    ai_scan_title: 'Έξυπνο Σκανάρισμα',
     ai_scan_instructions: 'Τράβα φωτογραφίες της άδειας κυκλοφορίας (μπροστά/πίσω) και προαιρετικά του κοντέρ. Η AI θα συμπληρώσει αυτόματα τα στοιχεία οχήματος και κατόχου.',
     ai_scan_license_section: 'Άδεια κυκλοφορίας',
     ai_scan_front: 'Μπροστά πλευρά',
@@ -346,7 +346,7 @@ window.I18N = {
     nav_services: 'Service',
     nav_reminders: 'Reminders',
     nav_settings: 'Settings',
-    nav_scan: 'AI Scan',
+    nav_scan: 'Smart Scan',
     nav_parts: 'Parts',
 
     add: 'Add',
@@ -526,7 +526,7 @@ window.I18N = {
     ai_api_key_help: 'Alternative. Stored only on your device.',
     anthropic_api_key_help: 'Used for AI registration scanning with Claude. Stored only on your device.',
 
-    ai_scan_title: 'AI Scan',
+    ai_scan_title: 'Smart Scan',
     ai_scan_instructions: 'Take photos of the registration (front/back) and optionally the odometer. AI will auto-fill vehicle and owner details.',
     ai_scan_license_section: 'Registration document',
     ai_scan_front: 'Front side',
