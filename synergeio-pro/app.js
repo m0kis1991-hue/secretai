@@ -4,6 +4,9 @@
 (function () {
   'use strict';
 
+  // Bump alongside sw.js CACHE_NAME so usage-ping reports match the deployed build.
+  const APP_VERSION = 'v29';
+
   // ---------- State ----------
   const state = {
     customers: [],
@@ -5382,7 +5385,11 @@
           style="width:100%;box-sizing:border-box;background:#0f172a;border:1.5px solid #475569;border-radius:0.5rem;color:white;padding:0.75rem 1rem;font-size:1rem;font-family:monospace;text-transform:uppercase;letter-spacing:0.05em;text-align:center;outline:none;margin-bottom:0.5rem;"
           oninput="this.value=this.value.toUpperCase()" />
         <div id="act-err" style="color:#f87171;font-size:0.8125rem;min-height:1.2rem;margin-bottom:0.75rem;"></div>
-        <button id="act-submit" style="width:100%;background:#1d4ed8;color:white;padding:0.75rem;border-radius:0.5rem;border:none;font-size:0.9375rem;font-weight:600;cursor:pointer;margin-bottom:0.625rem;">
+        <label style="display:flex;align-items:flex-start;gap:0.5rem;text-align:left;color:#94a3b8;font-size:0.75rem;line-height:1.5;margin-bottom:0.875rem;cursor:pointer;">
+          <input id="act-terms" type="checkbox" style="margin-top:0.15rem;flex-shrink:0;" />
+          <span>Αποδέχομαι τους <a href="terms.html" target="_blank" style="color:#60a5fa;text-decoration:underline;">Όρους Χρήσης</a> και την <a href="privacy.html" target="_blank" style="color:#60a5fa;text-decoration:underline;">Πολιτική Απορρήτου</a>.</span>
+        </label>
+        <button id="act-submit" disabled style="width:100%;background:#1d4ed8;opacity:0.5;color:white;padding:0.75rem;border-radius:0.5rem;border:none;font-size:0.9375rem;font-weight:600;cursor:not-allowed;margin-bottom:0.625rem;">
           Ενεργοποίηση
         </button>
         <button id="act-demo" style="width:100%;background:transparent;color:#94a3b8;border:1px solid #334155;padding:0.625rem;border-radius:0.5rem;font-size:0.8125rem;cursor:pointer;">
@@ -5396,8 +5403,16 @@
     const errEl = el.querySelector('#act-err');
     const submitBtn = el.querySelector('#act-submit');
     const demoBtn = el.querySelector('#act-demo');
+    const termsBox = el.querySelector('#act-terms');
+
+    termsBox.addEventListener('change', () => {
+      submitBtn.disabled = !termsBox.checked;
+      submitBtn.style.opacity = termsBox.checked ? '1' : '0.5';
+      submitBtn.style.cursor = termsBox.checked ? 'pointer' : 'not-allowed';
+    });
 
     async function tryActivate() {
+      if (!termsBox.checked) { errEl.textContent = 'Πρέπει να αποδεχτείτε τους Όρους Χρήσης και την Πολιτική Απορρήτου.'; return; }
       const code = (codeInput.value || '').trim().toUpperCase();
       if (!code) { errEl.textContent = 'Εισάγετε τον κωδικό ενεργοποίησης.'; return; }
       submitBtn.disabled = true;
@@ -5419,6 +5434,7 @@
           return;
         }
         await DB.setSetting('workshopId', code);
+        await DB.setSetting('termsAcceptedAt', new Date().toISOString());
         state.settings.workshopId = code;
         if (data.superadmin) {
           await DB.setSetting('workshopMode', 'admin');
@@ -5442,6 +5458,7 @@
     submitBtn.addEventListener('click', tryActivate);
     codeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') tryActivate(); });
     demoBtn.addEventListener('click', async () => {
+      if (!termsBox.checked) { errEl.textContent = 'Πρέπει να αποδεχτείτε τους Όρους Χρήσης και την Πολιτική Απορρήτου.'; return; }
       // Defense in depth: this screen shouldn't be reachable while already licensed (the
       // /activate route redirects away), but guard the destructive action itself too.
       if (state.settings.workshopId && state.settings.workshopMode !== 'demo') {
@@ -5452,6 +5469,7 @@
       const localId = 'ws_demo_' + Date.now().toString(36);
       await DB.setSetting('workshopId', localId);
       await DB.setSetting('workshopMode', 'demo');
+      await DB.setSetting('termsAcceptedAt', new Date().toISOString());
       state.settings.workshopId = localId;
       state.settings.workshopMode = 'demo';
       await seedDemoData();
@@ -5611,6 +5629,35 @@
 
   const LIC_CACHE_KEY = 'lic_last_check';
   const LIC_GRACE_MS = 3 * 24 * 3600000; // 3 days
+  const USAGE_PING_KEY = 'usage_last_ping';
+  const USAGE_PING_INTERVAL_MS = 12 * 3600000; // 12 hours
+
+  // Reports ONLY anonymous counters (how many records exist, when the app was last
+  // opened) so the super admin can see usage trends — never customer/vehicle names,
+  // plates, VINs, or any other business/personal data. See api/usage-ping.js.
+  function pingUsageIfDue(workshopId) {
+    if (!workshopId) return;
+    let last = 0;
+    try { last = Number(localStorage.getItem(USAGE_PING_KEY)) || 0; } catch (_) {}
+    if (Date.now() - last < USAGE_PING_INTERVAL_MS) return;
+    fetch('/api/usage-ping', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        workshopId,
+        appVersion: APP_VERSION,
+        counts: {
+          customers: state.customers.length,
+          vehicles: state.vehicles.length,
+          services: state.services.length,
+          jobOrders: state.jobOrders.length,
+          appointments: state.appointments.length,
+        },
+      }),
+    }).then(() => {
+      try { localStorage.setItem(USAGE_PING_KEY, String(Date.now())); } catch (_) {}
+    }).catch(() => {});
+  }
 
   async function checkLicenseStatus() {
     await loadAll();
@@ -5650,6 +5697,9 @@
       }
 
       applyLicenseStatus(data);
+      if (data.active !== false && state.settings.workshopMode !== 'admin') {
+        pingUsageIfDue(workshopId);
+      }
     } catch (_) {
       // Offline or server error — apply grace period logic
       applyOfflineGrace();
@@ -5814,10 +5864,25 @@
       return Math.ceil((pd - today) / 86400000);
     }
 
+    function saTabBarHtml(active) {
+      return `
+        <div class="flex gap-2 mb-4 border-b border-slate-200 dark:border-slate-700">
+          <button id="sa-tab-clients" class="px-3 py-2 text-sm font-medium border-b-2 -mb-px ${active === 'clients' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}">Πελάτες</button>
+          <button id="sa-tab-stats" class="px-3 py-2 text-sm font-medium border-b-2 -mb-px ${active === 'stats' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}">Στατιστικά Χρήσης</button>
+        </div>
+      `;
+    }
+
+    function wireSaTabBar(clients) {
+      $('#sa-tab-clients')?.addEventListener('click', () => renderAdminDashboard(clients));
+      $('#sa-tab-stats')?.addEventListener('click', () => renderStatsTab(clients));
+    }
+
     function renderAdminDashboard(clients) {
       const content = $('#sa-content');
       const today = new Date();
       content.innerHTML = `
+        ${saTabBarHtml('clients')}
         <div class="flex items-center justify-between mb-4">
           <h2 class="text-lg font-bold">Πελάτες (${clients.length})</h2>
           <button id="sa-add-btn" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-2 rounded-lg flex items-center gap-1">
@@ -5865,6 +5930,9 @@
                   <button data-cid="${U.escape(c.id)}" class="sa-edit text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50 text-slate-600 dark:text-slate-300">
                     ${icon('pencil','w-3.5 h-3.5 inline')} Επεξεργασία
                   </button>
+                  <button data-cid="${U.escape(c.id)}" class="sa-payments text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50 text-slate-600 dark:text-slate-300">
+                    ${icon('euro','w-3.5 h-3.5 inline')} Πληρωμές
+                  </button>
                 </div>
               </div>
               ${c.notes ? `<div class="mt-2 text-xs text-slate-400 italic border-t border-slate-100 dark:border-slate-700 pt-2">${U.escape(c.notes)}</div>` : ''}
@@ -5899,6 +5967,7 @@
         </div>
       `;
       refreshIcons();
+      wireSaTabBar(clients);
       wireAdminDashboard(clients);
     }
 
@@ -5985,6 +6054,175 @@
         const client = clients.find((c) => c.id === cid);
         if (client) showForm(client);
       }));
+
+      $$('.sa-payments').forEach((btn) => btn.addEventListener('click', () => {
+        const cid = btn.dataset.cid;
+        const client = clients.find((c) => c.id === cid);
+        if (client) openPaymentsModal(client);
+      }));
+    }
+
+    async function openPaymentsModal(client) {
+      openDialog(`Πληρωμές — ${client.workshop_name}`, `
+        <div class="space-y-4">
+          <div id="pm-history" class="space-y-2 max-h-48 overflow-auto text-sm">Φόρτωση…</div>
+          <div class="border-t border-slate-100 dark:border-slate-800 pt-3 space-y-2">
+            <div class="grid grid-cols-2 gap-2">
+              <div><label class="block text-xs font-medium mb-1">Ποσό (€)</label>
+                <input id="pm-amount" type="number" min="0" step="0.01" value="${client.monthly_fee || ''}" class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm" /></div>
+              <div><label class="block text-xs font-medium mb-1">Ημερομηνία</label>
+                <input id="pm-date" type="date" value="${new Date().toISOString().slice(0, 10)}" class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm" /></div>
+            </div>
+            <input id="pm-note" type="text" placeholder="Σημείωση (προαιρετικό)" class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm" />
+            <label class="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+              <input id="pm-reactivate" type="checkbox" ${!client.is_active ? 'checked' : ''} class="rounded" /> Ενεργοποίηση λογαριασμού μετά την καταγραφή
+            </label>
+            <button id="pm-save" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 rounded-lg text-sm">${icon('plus', 'w-4 h-4 inline mr-1')} Καταγραφή Πληρωμής</button>
+          </div>
+        </div>
+      `);
+
+      async function loadHistory() {
+        const histEl = $('#pm-history');
+        if (!histEl) return;
+        const resp = await fetch(`/api/admin-payments?client_id=${encodeURIComponent(client.id)}`, { headers: { 'x-admin-pin': adminPin } });
+        const rows = resp.ok ? await resp.json() : [];
+        if (!rows.length) {
+          histEl.innerHTML = `<div class="text-slate-400 italic">Καμία καταγεγραμμένη πληρωμή ακόμα.</div>`;
+          return;
+        }
+        const total = rows.reduce((s, r) => s + Number(r.amount), 0);
+        histEl.innerHTML = `
+          <div class="text-xs text-slate-400 mb-1">Σύνολο: ${total.toLocaleString('el-GR', { style: 'currency', currency: 'EUR' })} · ${rows.length} πληρωμές</div>
+          ${rows.map((r) => `
+            <div class="flex items-center justify-between gap-2 py-1 border-b border-slate-50 dark:border-slate-800 last:border-0">
+              <div>
+                <div class="font-medium">${Number(r.amount).toLocaleString('el-GR', { style: 'currency', currency: 'EUR' })}</div>
+                <div class="text-[11px] text-slate-400">${U.fmtDate(r.paid_at)}${r.method ? ' · ' + U.escape(r.method) : ''}${r.note ? ' · ' + U.escape(r.note) : ''}</div>
+              </div>
+              <button data-pid="${U.escape(r.id)}" class="pm-del text-slate-300 hover:text-red-500 p-1">${icon('trash-2', 'w-3.5 h-3.5')}</button>
+            </div>
+          `).join('')}
+        `;
+        refreshIcons();
+        $$('.pm-del').forEach((btn) => btn.addEventListener('click', async () => {
+          if (!confirm('Διαγραφή αυτής της πληρωμής;')) return;
+          await fetch(`/api/admin-payments?id=${encodeURIComponent(btn.dataset.pid)}`, { method: 'DELETE', headers: { 'x-admin-pin': adminPin } });
+          loadHistory();
+        }));
+      }
+
+      await loadHistory();
+
+      $('#pm-save').addEventListener('click', async () => {
+        const amount = Number($('#pm-amount').value);
+        if (!amount || amount <= 0) { U.toast('Εισάγετε έγκυρο ποσό', 'error'); return; }
+        const date = $('#pm-date').value;
+        const note = ($('#pm-note').value || '').trim();
+        const reactivate = $('#pm-reactivate').checked;
+        try {
+          const payResp = await fetch('/api/admin-payments', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-admin-pin': adminPin },
+            body: JSON.stringify({ client_id: client.id, amount, paid_at: date, note }),
+          });
+          if (!payResp.ok) throw new Error(await payResp.text());
+          if (reactivate && !client.is_active) {
+            const actResp = await fetch('/api/admin-clients', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json', 'x-admin-pin': adminPin },
+              body: JSON.stringify({ id: client.id, is_active: true }),
+            });
+            if (!actResp.ok) throw new Error(await actResp.text());
+            client.is_active = true;
+            const updated = await loadClients();
+            renderAdminDashboard(updated);
+          }
+          U.toast('Η πληρωμή καταγράφηκε');
+          $('#pm-amount').value = '';
+          $('#pm-note').value = '';
+          await loadHistory();
+        } catch (e) {
+          U.toast('Σφάλμα καταγραφής', 'error');
+        }
+      });
+    }
+
+    async function renderStatsTab(clients) {
+      const content = $('#sa-content');
+      content.innerHTML = `${saTabBarHtml('stats')}<div class="text-center py-12 text-slate-400">Φόρτωση στατιστικών…</div>`;
+      refreshIcons();
+      wireSaTabBar(clients);
+
+      const resp = await fetch('/api/admin-usage', { headers: { 'x-admin-pin': adminPin } });
+      const usage = resp.ok ? await resp.json() : [];
+      const usageByWid = {};
+      usage.forEach((u) => { usageByWid[u.workshop_id] = u; });
+
+      const activeClients = clients.filter((c) => c.is_active);
+      const mrr = activeClients.reduce((s, c) => s + Number(c.monthly_fee || 0), 0);
+      const now = Date.now();
+      const STALE_DAYS = 14;
+
+      const rows = clients.map((c) => {
+        const u = c.workshop_id ? usageByWid[c.workshop_id] : null;
+        const lastActive = u?.last_active_at ? new Date(u.last_active_at) : null;
+        const daysSince = lastActive ? Math.floor((now - lastActive.getTime()) / 86400000) : null;
+        return { client: c, usage: u, lastActive, daysSince };
+      });
+
+      const totalCustomers = usage.reduce((s, u) => s + (u.customers_count || 0), 0);
+      const totalVehicles = usage.reduce((s, u) => s + (u.vehicles_count || 0), 0);
+      const totalServices = usage.reduce((s, u) => s + (u.services_count || 0), 0);
+
+      content.innerHTML = `
+        ${saTabBarHtml('stats')}
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+          <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+            <div class="text-xs text-slate-400">Ενεργοί πελάτες</div>
+            <div class="text-xl font-bold">${activeClients.length}<span class="text-sm text-slate-400 font-normal">/${clients.length}</span></div>
+          </div>
+          <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+            <div class="text-xs text-slate-400">Μηνιαία έσοδα (MRR)</div>
+            <div class="text-xl font-bold">${mrr.toLocaleString('el-GR', { style: 'currency', currency: 'EUR' })}</div>
+          </div>
+          <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+            <div class="text-xs text-slate-400">Ανενεργοί &gt;14 ημ.</div>
+            <div class="text-xl font-bold">${rows.filter((r) => r.daysSince !== null && r.daysSince > STALE_DAYS).length}</div>
+          </div>
+          <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+            <div class="text-xs text-slate-400">Σύνολο εγγραφών</div>
+            <div class="text-xl font-bold">${(totalCustomers + totalVehicles + totalServices).toLocaleString('el-GR')}</div>
+          </div>
+        </div>
+
+        <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+          <div class="p-3 border-b border-slate-100 dark:border-slate-700 text-xs text-slate-400">
+            Στατιστικά χρήσης ανά πελάτη — μόνο αριθμοί εγγραφών, ποτέ ονόματα πελατών/οχημάτων ή άλλα προσωπικά δεδομένα.
+          </div>
+          <div class="divide-y divide-slate-100 dark:divide-slate-700">
+            ${rows.length === 0 ? `<div class="text-center py-8 text-slate-400 text-sm">Δεν υπάρχουν δεδομένα ακόμα.</div>` : rows.map((r) => {
+              const stale = r.daysSince !== null && r.daysSince > STALE_DAYS;
+              const neverActive = r.daysSince === null;
+              return `
+              <div class="p-3 flex items-center justify-between gap-3">
+                <div class="min-w-0 flex-1">
+                  <div class="font-medium text-sm truncate">${U.escape(r.client.workshop_name)}</div>
+                  <div class="text-xs ${stale ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400'}">
+                    ${neverActive ? 'Καμία χρήση ακόμα' : `Τελ. χρήση: πριν ${r.daysSince === 0 ? '<1 ημέρα' : r.daysSince + ' ημέρες'}`}
+                  </div>
+                </div>
+                <div class="text-right flex-shrink-0 text-xs text-slate-500 dark:text-slate-400">
+                  <div>${r.usage?.customers_count ?? 0} πελ. · ${r.usage?.vehicles_count ?? 0} οχ.</div>
+                  <div>${r.usage?.services_count ?? 0} εργ. · ${r.usage?.appointments_count ?? 0} ραντεβού</div>
+                </div>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>
+      `;
+      refreshIcons();
+      wireSaTabBar(clients);
     }
   }
 
@@ -6082,6 +6320,12 @@
             </label>
           </div>
           <button id="reset-data" class="w-full bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-300 border border-red-200 dark:border-red-900/50 hover:bg-red-100 dark:hover:bg-red-900/30 text-sm font-medium px-3 py-2.5 rounded-lg flex items-center justify-center gap-1">${icon('trash-2','w-4 h-4')} ${t('reset_data')}</button>
+        </div>
+
+        <div class="text-center text-xs text-slate-400 dark:text-slate-500 flex items-center justify-center gap-3">
+          <a href="terms.html" target="_blank" class="hover:underline">Όροι Χρήσης</a>
+          <span>·</span>
+          <a href="privacy.html" target="_blank" class="hover:underline">Πολιτική Απορρήτου</a>
         </div>
 
         <button id="save-settings" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 rounded-lg">${t('save')}</button>
