@@ -6016,7 +6016,10 @@
           const method = editId ? 'PUT' : 'POST';
           if (editId) payload.id = editId;
           const resp = await fetch(url, { method, headers: { 'Content-Type': 'application/json', 'x-admin-pin': adminPin }, body: JSON.stringify(payload) });
-          if (!resp.ok) throw new Error(await resp.text());
+          if (!resp.ok) {
+            const errBody = await resp.json().catch(() => null);
+            throw new Error(errBody?.error || 'Σφάλμα αποθήκευσης');
+          }
           U.toast('Αποθηκεύτηκε');
           const updated = await loadClients();
           renderAdminDashboard(updated);
@@ -6037,11 +6040,12 @@
         const confirmed = confirm(`${currentlyActive ? 'Απενεργοποίηση' : 'Ενεργοποίηση'} "${client.workshop_name}";`);
         if (!confirmed) return;
         try {
-          await fetch('/api/admin-clients', {
+          const toggleResp = await fetch('/api/admin-clients', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json', 'x-admin-pin': adminPin },
             body: JSON.stringify({ id: cid, is_active: !currentlyActive }),
           });
+          if (!toggleResp.ok) throw new Error();
           const updated = await loadClients();
           renderAdminDashboard(updated);
         } catch (e) {
@@ -6107,7 +6111,8 @@
         refreshIcons();
         $$('.pm-del').forEach((btn) => btn.addEventListener('click', async () => {
           if (!confirm('Διαγραφή αυτής της πληρωμής;')) return;
-          await fetch(`/api/admin-payments?id=${encodeURIComponent(btn.dataset.pid)}`, { method: 'DELETE', headers: { 'x-admin-pin': adminPin } });
+          const delResp = await fetch(`/api/admin-payments?id=${encodeURIComponent(btn.dataset.pid)}`, { method: 'DELETE', headers: { 'x-admin-pin': adminPin } });
+          if (!delResp.ok) U.toast('Σφάλμα διαγραφής', 'error');
           loadHistory();
         }));
       }

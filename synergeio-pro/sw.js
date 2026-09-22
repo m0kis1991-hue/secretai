@@ -1,5 +1,5 @@
 // Service Worker για offline λειτουργία
-const CACHE_NAME = 'synergeio-pro-v29';
+const CACHE_NAME = 'synergeio-pro-v30';
 const ASSETS = [
   './',
   './index.html',
@@ -34,6 +34,16 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+
+  const url = new URL(event.request.url);
+  if (url.pathname.startsWith('/api/')) {
+    // Never cache API responses: license/freeze status, admin client lists and
+    // payment/usage data must always be fresh, never served stale from a
+    // previous visit (a stale license-check could keep a frozen account unlocked).
+    event.respondWith(fetch(event.request));
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request).then((cached) => {
       const network = fetch(event.request)

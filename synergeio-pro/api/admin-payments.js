@@ -14,6 +14,13 @@
 //   ALTER TABLE gearlog_payments ENABLE ROW LEVEL SECURITY;
 //   CREATE POLICY "service_role_all" ON gearlog_payments USING (true) WITH CHECK (true);
 
+// Supabase/PostgREST error bodies are normally JSON, but a gateway timeout or
+// malformed response can come back as plain text — never let that throw.
+async function safeJson(resp) {
+  const text = await resp.text();
+  try { return text ? JSON.parse(text) : null; } catch (_) { return { message: text }; }
+}
+
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
@@ -47,7 +54,11 @@ module.exports = async function handler(req, res) {
         ? `?client_id=eq.${encodeURIComponent(clientId)}&select=*&order=paid_at.desc,created_at.desc`
         : `?select=*&order=paid_at.desc,created_at.desc`;
       const resp = await fetch(`${baseUrl}${qs}`, { headers });
-      const data = await resp.json();
+      const data = await safeJson(resp);
+      if (!resp.ok) {
+        console.error('admin-payments list error:', JSON.stringify(data));
+        return res.status(resp.status).json({ error: data?.message || 'Αποτυχία φόρτωσης πληρωμών' });
+      }
       return res.status(200).json(Array.isArray(data) ? data : []);
     }
 
@@ -66,7 +77,7 @@ module.exports = async function handler(req, res) {
         note: (body?.note || '').trim() || null,
       };
       const resp = await fetch(baseUrl, { method: 'POST', headers, body: JSON.stringify(payload) });
-      const data = await resp.json();
+      const data = await safeJson(resp);
       if (!resp.ok) {
         console.error('admin-payments insert error:', JSON.stringify(data));
         return res.status(resp.status).json({ error: data?.message || 'Αποτυχία καταγραφής πληρωμής' });
@@ -77,7 +88,12 @@ module.exports = async function handler(req, res) {
     if (req.method === 'DELETE') {
       const id = req.query?.id || (typeof req.body === 'string' ? JSON.parse(req.body) : req.body)?.id;
       if (!id) return res.status(400).json({ error: 'Λείπει id' });
-      await fetch(`${baseUrl}?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE', headers });
+      const delResp = await fetch(`${baseUrl}?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE', headers });
+      if (!delResp.ok) {
+        const errBody = await safeJson(delResp);
+        console.error('admin-payments delete error:', JSON.stringify(errBody));
+        return res.status(delResp.status).json({ error: 'Αποτυχία διαγραφής πληρωμής' });
+      }
       return res.status(204).end();
     }
 

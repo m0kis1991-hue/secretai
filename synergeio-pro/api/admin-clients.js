@@ -18,6 +18,13 @@
 //   ALTER TABLE gearlog_clients ENABLE ROW LEVEL SECURITY;
 //   CREATE POLICY "service_role_all" ON gearlog_clients USING (true) WITH CHECK (true);
 
+// Supabase/PostgREST error bodies are normally JSON, but a gateway timeout or
+// malformed response can come back as plain text — never let that throw.
+async function safeJson(resp) {
+  const text = await resp.text();
+  try { return text ? JSON.parse(text) : null; } catch (_) { return { message: text }; }
+}
+
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
@@ -47,14 +54,23 @@ module.exports = async function handler(req, res) {
   try {
     if (req.method === 'GET') {
       const resp = await fetch(`${baseUrl}?select=*&order=created_at.desc`, { headers });
-      const data = await resp.json();
+      const data = await safeJson(resp);
+      if (!resp.ok) {
+        console.error('admin-clients list error:', JSON.stringify(data));
+        return res.status(resp.status).json({ error: data?.message || 'Αποτυχία φόρτωσης πελατών' });
+      }
       return res.status(200).json(Array.isArray(data) ? data : []);
     }
 
     if (req.method === 'POST') {
       const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
       const resp = await fetch(baseUrl, { method: 'POST', headers, body: JSON.stringify(body) });
-      const data = await resp.json();
+      const data = await safeJson(resp);
+      if (!resp.ok) {
+        console.error('admin-clients insert error:', JSON.stringify(data));
+        const msg = data?.code === '23505' ? 'Ο κωδικός ενεργοποίησης χρησιμοποιείται ήδη' : (data?.message || 'Αποτυχία δημιουργίας πελάτη');
+        return res.status(resp.status).json({ error: msg });
+      }
       return res.status(201).json(Array.isArray(data) ? data[0] : data);
     }
 
@@ -62,13 +78,23 @@ module.exports = async function handler(req, res) {
       const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
       const { id, ...data } = body;
       const resp = await fetch(`${baseUrl}?id=eq.${id}`, { method: 'PATCH', headers, body: JSON.stringify(data) });
-      const result = await resp.json();
+      const result = await safeJson(resp);
+      if (!resp.ok) {
+        console.error('admin-clients update error:', JSON.stringify(result));
+        const msg = result?.code === '23505' ? 'Ο κωδικός ενεργοποίησης χρησιμοποιείται ήδη' : (result?.message || 'Αποτυχία ενημέρωσης πελάτη');
+        return res.status(resp.status).json({ error: msg });
+      }
       return res.status(200).json(Array.isArray(result) ? result[0] : result);
     }
 
     if (req.method === 'DELETE') {
       const id = req.query?.id || (typeof req.body === 'string' ? JSON.parse(req.body) : req.body)?.id;
-      await fetch(`${baseUrl}?id=eq.${id}`, { method: 'DELETE', headers });
+      const delResp = await fetch(`${baseUrl}?id=eq.${id}`, { method: 'DELETE', headers });
+      if (!delResp.ok) {
+        const errBody = await safeJson(delResp);
+        console.error('admin-clients delete error:', JSON.stringify(errBody));
+        return res.status(delResp.status).json({ error: 'Αποτυχία διαγραφής πελάτη' });
+      }
       return res.status(204).end();
     }
 
