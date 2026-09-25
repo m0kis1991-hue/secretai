@@ -5375,109 +5375,229 @@
   function showActivationScreen() {
     const el = document.createElement('div');
     el.id = 'activation-screen';
-    el.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#0f172a;display:flex;align-items:center;justify-content:center;padding:1.5rem;';
-    el.innerHTML = `
-      <div style="background:#1e293b;border-radius:1rem;padding:2rem;width:100%;max-width:360px;text-align:center;border:1px solid #334155;">
+    el.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#0f172a;display:flex;align-items:center;justify-content:center;padding:1.5rem;overflow:auto;';
+    document.body.appendChild(el);
+
+    let termsAccepted = false;
+
+    function box(inner) {
+      return `<div style="background:#1e293b;border-radius:1rem;padding:2rem;width:100%;max-width:360px;text-align:center;border:1px solid #334155;margin:auto;">${inner}</div>`;
+    }
+    function termsCheckbox(id) {
+      return `
+        <label style="display:flex;align-items:flex-start;gap:0.5rem;text-align:left;color:#94a3b8;font-size:0.75rem;line-height:1.5;margin-bottom:0.875rem;cursor:pointer;">
+          <input id="${id}" type="checkbox" ${termsAccepted ? 'checked' : ''} style="margin-top:0.15rem;flex-shrink:0;" />
+          <span>Αποδέχομαι τους <a href="terms.html" target="_blank" style="color:#60a5fa;text-decoration:underline;">Όρους Χρήσης</a> και την <a href="privacy.html" target="_blank" style="color:#60a5fa;text-decoration:underline;">Πολιτική Απορρήτου</a>.</span>
+        </label>`;
+    }
+    function wireTerms(id, submitBtn) {
+      const checkboxEl = el.querySelector('#' + id);
+      function sync() {
+        submitBtn.disabled = !termsAccepted;
+        submitBtn.style.opacity = termsAccepted ? '1' : '0.5';
+        submitBtn.style.cursor = termsAccepted ? 'pointer' : 'not-allowed';
+      }
+      checkboxEl.addEventListener('change', () => {
+        termsAccepted = checkboxEl.checked;
+        sync();
+      });
+      sync(); // the checkbox may already be checked (shared termsAccepted) when switching views
+    }
+
+    function renderCodeView() {
+      el.innerHTML = box(`
         <img src="icon-192.png" style="width:72px;height:72px;border-radius:1rem;margin:0 auto 1rem;" />
         <div style="color:white;font-size:1.25rem;font-weight:700;margin-bottom:0.5rem">Καλώς ήρθατε στο GearLog</div>
-        <div style="color:#94a3b8;font-size:0.8125rem;margin-bottom:1.5rem;line-height:1.6">Εισάγετε τον κωδικό ενεργοποίησης που σας έδωσε ο πάροχος για να ξεκινήσετε.</div>
+        <div style="color:#94a3b8;font-size:0.8125rem;margin-bottom:1.5rem;line-height:1.6">Έχετε ήδη κωδικό ενεργοποίησης; Εισάγετέ τον για να ξεκινήσετε.</div>
         <input id="act-code" type="text" placeholder="π.χ. GL-A3B7-X9K2"
           style="width:100%;box-sizing:border-box;background:#0f172a;border:1.5px solid #475569;border-radius:0.5rem;color:white;padding:0.75rem 1rem;font-size:1rem;font-family:monospace;text-transform:uppercase;letter-spacing:0.05em;text-align:center;outline:none;margin-bottom:0.5rem;"
           oninput="this.value=this.value.toUpperCase()" />
         <div id="act-err" style="color:#f87171;font-size:0.8125rem;min-height:1.2rem;margin-bottom:0.75rem;"></div>
-        <label style="display:flex;align-items:flex-start;gap:0.5rem;text-align:left;color:#94a3b8;font-size:0.75rem;line-height:1.5;margin-bottom:0.875rem;cursor:pointer;">
-          <input id="act-terms" type="checkbox" style="margin-top:0.15rem;flex-shrink:0;" />
-          <span>Αποδέχομαι τους <a href="terms.html" target="_blank" style="color:#60a5fa;text-decoration:underline;">Όρους Χρήσης</a> και την <a href="privacy.html" target="_blank" style="color:#60a5fa;text-decoration:underline;">Πολιτική Απορρήτου</a>.</span>
-        </label>
+        ${termsCheckbox('act-terms')}
         <button id="act-submit" disabled style="width:100%;background:#1d4ed8;opacity:0.5;color:white;padding:0.75rem;border-radius:0.5rem;border:none;font-size:0.9375rem;font-weight:600;cursor:not-allowed;margin-bottom:0.625rem;">
           Ενεργοποίηση
         </button>
-        <button id="act-demo" style="width:100%;background:transparent;color:#94a3b8;border:1px solid #334155;padding:0.625rem;border-radius:0.5rem;font-size:0.8125rem;cursor:pointer;">
+        <button id="act-goto-signup" style="width:100%;background:transparent;color:#60a5fa;border:1px solid #334155;padding:0.625rem;border-radius:0.5rem;font-size:0.8125rem;cursor:pointer;margin-bottom:0.5rem;font-weight:600;">
+          Δημιουργία Νέου Λογαριασμού
+        </button>
+        <button id="act-demo" style="width:100%;background:transparent;color:#94a3b8;border:none;padding:0.375rem;font-size:0.8125rem;cursor:pointer;">
           Δοκιμάστε το Demo
         </button>
-      </div>
-    `;
-    document.body.appendChild(el);
+      `);
 
-    const codeInput = el.querySelector('#act-code');
-    const errEl = el.querySelector('#act-err');
-    const submitBtn = el.querySelector('#act-submit');
-    const demoBtn = el.querySelector('#act-demo');
-    const termsBox = el.querySelector('#act-terms');
+      const codeInput = el.querySelector('#act-code');
+      const errEl = el.querySelector('#act-err');
+      const submitBtn = el.querySelector('#act-submit');
+      const demoBtn = el.querySelector('#act-demo');
+      wireTerms('act-terms', submitBtn);
 
-    termsBox.addEventListener('change', () => {
-      submitBtn.disabled = !termsBox.checked;
-      submitBtn.style.opacity = termsBox.checked ? '1' : '0.5';
-      submitBtn.style.cursor = termsBox.checked ? 'pointer' : 'not-allowed';
-    });
-
-    async function tryActivate() {
-      if (!termsBox.checked) { errEl.textContent = 'Πρέπει να αποδεχτείτε τους Όρους Χρήσης και την Πολιτική Απορρήτου.'; return; }
-      const code = (codeInput.value || '').trim().toUpperCase();
-      if (!code) { errEl.textContent = 'Εισάγετε τον κωδικό ενεργοποίησης.'; return; }
-      submitBtn.disabled = true;
-      submitBtn.textContent = '…';
-      errEl.textContent = '';
-      try {
-        const resp = await fetch(`/api/license-check?workshopId=${encodeURIComponent(code)}`);
-        const data = await resp.json();
-        if (!data.registered) {
-          errEl.textContent = 'Ο κωδικός δεν βρέθηκε. Ελέγξτε και δοκιμάστε ξανά.';
+      async function tryActivate() {
+        if (!termsAccepted) { errEl.textContent = 'Πρέπει να αποδεχτείτε τους Όρους Χρήσης και την Πολιτική Απορρήτου.'; return; }
+        const code = (codeInput.value || '').trim().toUpperCase();
+        if (!code) { errEl.textContent = 'Εισάγετε τον κωδικό ενεργοποίησης.'; return; }
+        submitBtn.disabled = true;
+        submitBtn.textContent = '…';
+        errEl.textContent = '';
+        try {
+          const resp = await fetch(`/api/license-check?workshopId=${encodeURIComponent(code)}`);
+          const data = await resp.json();
+          if (!data.registered) {
+            errEl.textContent = 'Ο κωδικός δεν βρέθηκε. Ελέγξτε και δοκιμάστε ξανά.';
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Ενεργοποίηση';
+            return;
+          }
+          if (data.active === false) {
+            errEl.textContent = 'Ο λογαριασμός δεν είναι ενεργός ακόμα (εκκρεμεί πληρωμή) ή έχει ανασταλεί. Επικοινωνήστε με τον πάροχο.';
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Ενεργοποίηση';
+            return;
+          }
+          await DB.setSetting('workshopId', code);
+          await DB.setSetting('termsAcceptedAt', new Date().toISOString());
+          state.settings.workshopId = code;
+          if (data.superadmin) {
+            await DB.setSetting('workshopMode', 'admin');
+            localStorage.setItem(LIC_CACHE_KEY, JSON.stringify({ ts: Date.now(), active: true, data: { active: true, registered: true } }));
+            el.remove();
+            updateSANavLink(true);
+            location.hash = '#/superadmin';
+          } else {
+            await DB.setSetting('workshopMode', 'licensed');
+            localStorage.setItem(LIC_CACHE_KEY, JSON.stringify({ ts: Date.now(), active: true, data }));
+            el.remove();
+            applyLicenseStatus(data);
+          }
+        } catch (_) {
+          errEl.textContent = 'Σφάλμα σύνδεσης. Ελέγξτε το internet σας.';
           submitBtn.disabled = false;
           submitBtn.textContent = 'Ενεργοποίηση';
-          return;
         }
-        if (data.active === false) {
-          errEl.textContent = 'Ο λογαριασμός αυτός έχει ανασταλεί. Επικοινωνήστε με τον πάροχο.';
-          submitBtn.disabled = false;
-          submitBtn.textContent = 'Ενεργοποίηση';
-          return;
-        }
-        await DB.setSetting('workshopId', code);
-        await DB.setSetting('termsAcceptedAt', new Date().toISOString());
-        state.settings.workshopId = code;
-        if (data.superadmin) {
-          await DB.setSetting('workshopMode', 'admin');
-          localStorage.setItem(LIC_CACHE_KEY, JSON.stringify({ ts: Date.now(), active: true, data: { active: true, registered: true } }));
-          el.remove();
-          updateSANavLink(true);
-          location.hash = '#/superadmin';
-        } else {
-          await DB.setSetting('workshopMode', 'licensed');
-          localStorage.setItem(LIC_CACHE_KEY, JSON.stringify({ ts: Date.now(), active: true, data }));
-          el.remove();
-          applyLicenseStatus(data);
-        }
-      } catch (_) {
-        errEl.textContent = 'Σφάλμα σύνδεσης. Ελέγξτε το internet σας.';
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Ενεργοποίηση';
       }
+
+      submitBtn.addEventListener('click', tryActivate);
+      codeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') tryActivate(); });
+      el.querySelector('#act-goto-signup').addEventListener('click', renderSignupView);
+      demoBtn.addEventListener('click', async () => {
+        if (!termsAccepted) { errEl.textContent = 'Πρέπει να αποδεχτείτε τους Όρους Χρήσης και την Πολιτική Απορρήτου.'; return; }
+        if (state.settings.workshopId && state.settings.workshopMode !== 'demo') {
+          if (!confirm('Έχετε ήδη ενεργοποιημένο λογαριασμό. Η εκκίνηση demo θα αντικαταστήσει την πρόσβαση στα δεδομένα σας. Συνέχεια;')) return;
+        }
+        demoBtn.disabled = true;
+        demoBtn.textContent = 'Φόρτωση demo…';
+        const localId = 'ws_demo_' + Date.now().toString(36);
+        await DB.setSetting('workshopId', localId);
+        await DB.setSetting('workshopMode', 'demo');
+        await DB.setSetting('termsAcceptedAt', new Date().toISOString());
+        state.settings.workshopId = localId;
+        state.settings.workshopMode = 'demo';
+        await seedDemoData();
+        await loadAll();
+        el.remove();
+        showDemoBanner();
+        router();
+      });
     }
 
-    submitBtn.addEventListener('click', tryActivate);
-    codeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') tryActivate(); });
-    demoBtn.addEventListener('click', async () => {
-      if (!termsBox.checked) { errEl.textContent = 'Πρέπει να αποδεχτείτε τους Όρους Χρήσης και την Πολιτική Απορρήτου.'; return; }
-      // Defense in depth: this screen shouldn't be reachable while already licensed (the
-      // /activate route redirects away), but guard the destructive action itself too.
-      if (state.settings.workshopId && state.settings.workshopMode !== 'demo') {
-        if (!confirm('Έχετε ήδη ενεργοποιημένο λογαριασμό. Η εκκίνηση demo θα αντικαταστήσει την πρόσβαση στα δεδομένα σας. Συνέχεια;')) return;
+    function renderSignupView() {
+      el.innerHTML = box(`
+        <img src="icon-192.png" style="width:64px;height:64px;border-radius:1rem;margin:0 auto 0.75rem;" />
+        <div style="color:white;font-size:1.125rem;font-weight:700;margin-bottom:0.375rem">Δημιουργία Λογαριασμού</div>
+        <div style="color:#94a3b8;font-size:0.8125rem;margin-bottom:1.25rem;line-height:1.6">Καταχωρήστε το συνεργείο σας. Θα ενεργοποιηθεί μόλις ολοκληρωθεί η πληρωμή της συνδρομής.</div>
+        <input id="su-name" type="text" placeholder="Όνομα Συνεργείου *"
+          style="width:100%;box-sizing:border-box;background:#0f172a;border:1.5px solid #475569;border-radius:0.5rem;color:white;padding:0.7rem 0.9rem;font-size:0.9rem;outline:none;margin-bottom:0.5rem;" />
+        <input id="su-contact" type="text" placeholder="Υπεύθυνος"
+          style="width:100%;box-sizing:border-box;background:#0f172a;border:1.5px solid #475569;border-radius:0.5rem;color:white;padding:0.7rem 0.9rem;font-size:0.9rem;outline:none;margin-bottom:0.5rem;" />
+        <input id="su-phone" type="tel" placeholder="Τηλέφωνο *"
+          style="width:100%;box-sizing:border-box;background:#0f172a;border:1.5px solid #475569;border-radius:0.5rem;color:white;padding:0.7rem 0.9rem;font-size:0.9rem;outline:none;margin-bottom:0.5rem;" />
+        <input id="su-email" type="email" placeholder="Email"
+          style="width:100%;box-sizing:border-box;background:#0f172a;border:1.5px solid #475569;border-radius:0.5rem;color:white;padding:0.7rem 0.9rem;font-size:0.9rem;outline:none;margin-bottom:0.5rem;" />
+        <input id="su-website" type="text" autocomplete="off" tabindex="-1"
+          style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;" />
+        <div id="su-err" style="color:#f87171;font-size:0.8125rem;min-height:1.2rem;margin-bottom:0.5rem;"></div>
+        ${termsCheckbox('su-terms')}
+        <button id="su-submit" disabled style="width:100%;background:#1d4ed8;opacity:0.5;color:white;padding:0.75rem;border-radius:0.5rem;border:none;font-size:0.9375rem;font-weight:600;cursor:not-allowed;margin-bottom:0.625rem;">
+          Υποβολή Αίτησης
+        </button>
+        <button id="su-back" style="width:100%;background:transparent;color:#94a3b8;border:none;padding:0.375rem;font-size:0.8125rem;cursor:pointer;">
+          ← Έχω ήδη κωδικό
+        </button>
+      `);
+
+      const nameInput = el.querySelector('#su-name');
+      const contactInput = el.querySelector('#su-contact');
+      const phoneInput = el.querySelector('#su-phone');
+      const emailInput = el.querySelector('#su-email');
+      const websiteInput = el.querySelector('#su-website');
+      const errEl = el.querySelector('#su-err');
+      const submitBtn = el.querySelector('#su-submit');
+      wireTerms('su-terms', submitBtn);
+
+      async function trySignup() {
+        if (!termsAccepted) { errEl.textContent = 'Πρέπει να αποδεχτείτε τους Όρους Χρήσης και την Πολιτική Απορρήτου.'; return; }
+        const workshopName = (nameInput.value || '').trim();
+        const phone = (phoneInput.value || '').trim();
+        if (!workshopName) { errEl.textContent = 'Το όνομα συνεργείου είναι υποχρεωτικό.'; return; }
+        if (!phone) { errEl.textContent = 'Το τηλέφωνο είναι υποχρεωτικό.'; return; }
+        submitBtn.disabled = true;
+        submitBtn.textContent = '…';
+        errEl.textContent = '';
+        try {
+          const resp = await fetch('/api/signup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              workshop_name: workshopName,
+              contact_name: (contactInput.value || '').trim(),
+              phone,
+              email: (emailInput.value || '').trim(),
+              website: websiteInput.value,
+            }),
+          });
+          const data = await resp.json().catch(() => null);
+          if (!resp.ok) {
+            errEl.textContent = data?.error || 'Σφάλμα υποβολής αίτησης.';
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Υποβολή Αίτησης';
+            return;
+          }
+          await DB.setSetting('workshopId', data.workshopId);
+          await DB.setSetting('workshopMode', 'licensed');
+          await DB.setSetting('termsAcceptedAt', new Date().toISOString());
+          state.settings.workshopId = data.workshopId;
+          renderConfirmView(data.workshopId, workshopName);
+        } catch (_) {
+          errEl.textContent = 'Σφάλμα σύνδεσης. Ελέγξτε το internet σας.';
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Υποβολή Αίτησης';
+        }
       }
-      demoBtn.disabled = true;
-      demoBtn.textContent = 'Φόρτωση demo…';
-      const localId = 'ws_demo_' + Date.now().toString(36);
-      await DB.setSetting('workshopId', localId);
-      await DB.setSetting('workshopMode', 'demo');
-      await DB.setSetting('termsAcceptedAt', new Date().toISOString());
-      state.settings.workshopId = localId;
-      state.settings.workshopMode = 'demo';
-      await seedDemoData();
-      await loadAll();
-      el.remove();
-      showDemoBanner();
-      router();
-    });
+
+      submitBtn.addEventListener('click', trySignup);
+      el.querySelector('#su-back').addEventListener('click', renderCodeView);
+    }
+
+    function renderConfirmView(workshopId, workshopName) {
+      el.innerHTML = box(`
+        <div style="width:56px;height:56px;background:#059669;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:1.75rem;margin:0 auto 1rem;">✓</div>
+        <div style="color:white;font-size:1.125rem;font-weight:700;margin-bottom:0.5rem">Η αίτησή σας καταχωρήθηκε!</div>
+        <div style="color:#94a3b8;font-size:0.8125rem;margin-bottom:1.25rem;line-height:1.6">Ο λογαριασμός του «${U.escape(workshopName)}» θα ενεργοποιηθεί μόλις ολοκληρωθεί η πληρωμή της συνδρομής. Κρατήστε τον παρακάτω κωδικό — θα τον χρειαστείτε αν εγκαταστήσετε την εφαρμογή σε άλλη συσκευή.</div>
+        <div style="background:#0f172a;border:1.5px solid #475569;border-radius:0.5rem;padding:0.75rem;font-family:monospace;font-size:1.125rem;letter-spacing:0.05em;color:#60a5fa;font-weight:700;margin-bottom:1.25rem;">${U.escape(workshopId)}</div>
+        <button id="conf-continue" style="width:100%;background:#1d4ed8;color:white;padding:0.75rem;border-radius:0.5rem;border:none;font-size:0.9375rem;font-weight:600;cursor:pointer;">
+          Το κατάλαβα
+        </button>
+      `);
+      el.querySelector('#conf-continue').addEventListener('click', async () => {
+        el.remove();
+        // Mirrors the app's own boot sequence (init(): router() then checkLicenseStatus())
+        // so the fresh, still-inactive account is immediately gated instead of getting a
+        // free unlocked session until the next full reload.
+        await router();
+        checkLicenseStatus();
+      });
+    }
+
+    renderCodeView();
   }
 
   function showDemoBanner() {
@@ -5752,9 +5872,14 @@
       el.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#0f172a;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:1.25rem;padding:2rem;text-align:center;';
       el.innerHTML = `
         <div style="width:64px;height:64px;background:#ef4444;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:2rem">🔒</div>
-        <div style="color:white;font-size:1.25rem;font-weight:700">Η πρόσβαση έχει ανασταλεί</div>
-        <div style="color:#94a3b8;font-size:0.875rem;max-width:320px;line-height:1.6">Η συνδρομή σας έχει λήξει ή ανασταλεί. Επικοινωνήστε με τον πάροχο για να ενεργοποιηθεί ξανά η πρόσβαση.</div>
+        <div style="color:white;font-size:1.25rem;font-weight:700">Ο λογαριασμός δεν είναι ενεργός</div>
+        <div style="color:#94a3b8;font-size:0.875rem;max-width:320px;line-height:1.6">Αν μόλις εγγραφήκατε, ο λογαριασμός σας ενεργοποιείται μόλις ολοκληρωθεί η πληρωμή της συνδρομής. Αν είχατε ήδη πρόσβαση, η συνδρομή σας έχει λήξει ή ανασταλεί. Επικοινωνήστε με τον πάροχο.</div>
         ${data.workshopName ? `<div style="color:#475569;font-size:0.75rem">Συνεργείο: ${U.escape(data.workshopName)}</div>` : ''}
+        <a href="https://wa.me/306982940193?text=${encodeURIComponent('Γεια σας, έκανα εγγραφή στο GearLog (' + (data.workshopName || '') + ') και θα ήθελα να ολοκληρώσω την πληρωμή.')}" target="_blank"
+          style="display:flex;align-items:center;justify-content:center;gap:0.5rem;background:#22c55e;color:white;font-weight:600;padding:0.625rem 1.25rem;border-radius:0.5rem;text-decoration:none;font-size:0.875rem;">
+          <svg style="width:1.1rem;height:1.1rem" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+          Επικοινωνία WhatsApp
+        </a>
       `;
       document.body.appendChild(el);
       return;
