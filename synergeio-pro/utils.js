@@ -3,6 +3,8 @@
 // =========================================================
 window.U = (function () {
 
+  let lastAiError = null;
+
   function escape(s) {
     if (s == null) return '';
     return String(s)
@@ -317,6 +319,7 @@ Return ONLY a valid JSON object — no markdown, no explanation, no extra text:
   }
 
   async function aiExtractRegistration(imageDataUrls, odometerDataUrl) {
+    lastAiError = null; // clear any stale error from a previous attempt before this one runs
     const urls = Array.isArray(imageDataUrls) ? imageDataUrls : [imageDataUrls];
 
     // 1. Server-side route (Vercel deployment — key is secure in env var)
@@ -335,6 +338,7 @@ Return ONLY a valid JSON object — no markdown, no explanation, no extra text:
     } catch (e) {
       const isNetwork = e instanceof TypeError || (e.message && e.message.toLowerCase().includes('fetch'));
       if (!isNetwork) {
+        lastAiError = e.message;
         toast(e.message, 'error');
         return null;
       }
@@ -346,7 +350,8 @@ Return ONLY a valid JSON object — no markdown, no explanation, no extra text:
     const openaiKey = localStorage.getItem('ai_api_key');
 
     if (!anthropicKey && !openaiKey) {
-      toast(window.t ? window.t('ai_scan_no_key') : 'Δεν βρέθηκε AI key', 'error');
+      lastAiError = window.t ? window.t('ai_scan_no_key') : 'Δεν βρέθηκε AI key';
+      toast(lastAiError, 'error');
       return null;
     }
 
@@ -382,7 +387,8 @@ Return ONLY a valid JSON object — no markdown, no explanation, no extra text:
         return normalizeAiScanResult(extractJsonObject(txt));
       } catch (e) {
         console.error('Claude direct call failed:', e);
-        toast(window.t ? window.t('error_generic') : 'Σφάλμα AI', 'error');
+        lastAiError = e.message || (window.t ? window.t('error_generic') : 'Σφάλμα AI');
+        toast(lastAiError, 'error');
         return null;
       }
     }
@@ -406,7 +412,8 @@ Return ONLY a valid JSON object — no markdown, no explanation, no extra text:
       return normalizeAiScanResult(extractJsonObject(txt));
     } catch (e) {
       console.error('OpenAI scan failed:', e);
-      toast(window.t ? window.t('error_generic') : 'Σφάλμα AI', 'error');
+      lastAiError = e.message || (window.t ? window.t('error_generic') : 'Σφάλμα AI');
+      toast(lastAiError, 'error');
       return null;
     }
   }
@@ -668,6 +675,7 @@ Return ONLY a valid JSON object — no markdown, no explanation, no extra text:
     computeNextService,
     reminderStatus,
     aiExtractRegistration,
+    getLastAiError: () => lastAiError,
     partsSearchLinks,
     partsStoreLinks,
     servicePdf,

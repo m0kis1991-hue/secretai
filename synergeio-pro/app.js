@@ -779,17 +779,25 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ imageDataUrl: dataUrl }),
         });
-        const data = await resp.json();
-        if (data.plate) {
+        const data = await resp.json().catch(() => null);
+        if (!resp.ok || !data) {
+          // A failed request (AI service down, quota/billing issue, network blip, etc.)
+          // is a different problem than "no plate visible in this photo" — conflating
+          // the two hid real outages behind a misleading "plate not found" message.
+          result.innerHTML = `<p class="text-center text-red-400 text-sm py-2">${U.escape(data?.error || `Σφάλμα υπηρεσίας AI (${resp.status})`)}</p>`;
+          return;
+        }
+        if (data?.plate) {
           const inp = $('#dash-plate');
           if (inp) inp.value = data.plate;
           result.innerHTML = '';
           plateLookup();
         } else {
-          result.innerHTML = `<p class="text-center text-red-400 text-sm py-2">Δεν βρέθηκε πινακίδα στη φωτογραφία</p>`;
+          result.innerHTML = `<p class="text-center text-red-400 text-sm py-2">Δεν βρέθηκε πινακίδα στη φωτογραφία — δοκίμασε πιο κοντινή/καθαρή λήψη</p>`;
         }
       } catch (e) {
-        result.innerHTML = `<p class="text-center text-red-400 text-sm py-2">Σφάλμα ανάγνωσης πινακίδας</p>`;
+        const msg = e instanceof Error ? e.message : null;
+        result.innerHTML = `<p class="text-center text-red-400 text-sm py-2">Σφάλμα ανάγνωσης πινακίδας${msg ? ': ' + U.escape(msg) : ''}</p>`;
       }
     }
 
@@ -2083,7 +2091,8 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ brand: veh.brand, model: veh.model, year: veh.year, mileage: veh.mileage, engine: veh.engine, fuel: veh.fuel }),
         });
-        const data = await resp.json();
+        const data = await resp.json().catch(() => null);
+        if (!resp.ok || !data) throw new Error(data?.error || `Σφάλμα υπηρεσίας AI (${resp.status})`);
         if (!data.tasks || !data.tasks.length) { resultEl.innerHTML = '<p class="text-sm text-slate-400 py-2">Δεν βρέθηκαν προτάσεις.</p>'; return; }
 
         const priorityStyle = { urgent: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300', recommended: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300', suggested: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' };
@@ -2147,7 +2156,7 @@
           });
         });
       } catch (e) {
-        resultEl.innerHTML = '<p class="text-sm text-red-400 py-2">Σφάλμα σύνδεσης με AI.</p>';
+        resultEl.innerHTML = `<p class="text-sm text-red-400 py-2">${U.escape(e.message || 'Σφάλμα σύνδεσης με AI.')}</p>`;
       } finally {
         btn.disabled = false;
         btn.innerHTML = `${icon('sparkles','w-3 h-3')} Ανάλυση οχήματος`;
@@ -2646,7 +2655,7 @@
       if (!data) {
         result.innerHTML = `
           <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-900/50 rounded-xl p-4 space-y-3">
-            <p class="text-sm text-red-600 dark:text-red-400">${t('error_generic')}</p>
+            <p class="text-sm text-red-600 dark:text-red-400">${U.escape(U.getLastAiError() || t('error_generic'))}</p>
             <button onclick="window._scanRetake()" class="w-full bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 font-medium py-2.5 rounded-lg text-sm flex items-center justify-center gap-2">
               ${icon('camera','w-4 h-4')} Ξανά φωτογράφηση
             </button>
