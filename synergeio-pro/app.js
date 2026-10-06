@@ -7,6 +7,11 @@
   // Bump alongside sw.js CACHE_NAME so usage-ping reports match the deployed build.
   const APP_VERSION = 'v29';
 
+  // Memoized across the page's lifetime so navigating to/from the signup view
+  // repeatedly (e.g. "← Έχω ήδη κωδικό" then back) doesn't re-fetch config or
+  // re-run Google's initialize() every single time.
+  let _googleConfigPromise = null;
+
   // ---------- State ----------
   const state = {
     customers: [],
@@ -5562,8 +5567,11 @@
 
       async function setupGoogleSignIn() {
         try {
-          const resp = await fetch('/api/signup'); // GET = public config (no serverless-function slot to spare for a separate endpoint)
-          const cfg = await resp.json();
+          if (!_googleConfigPromise) {
+            // GET /api/signup doubles as public config (no serverless-function slot to spare for a separate endpoint).
+            _googleConfigPromise = fetch('/api/signup').then((r) => r.json()).catch(() => ({}));
+          }
+          const cfg = await _googleConfigPromise;
           if (!cfg?.googleClientId) return; // not configured — no Google option, manual form only
           await loadScriptOnce('https://accounts.google.com/gsi/client');
           if (!window.google?.accounts?.id || !el.isConnected) return;
