@@ -5562,7 +5562,7 @@
 
       async function setupGoogleSignIn() {
         try {
-          const resp = await fetch('/api/config');
+          const resp = await fetch('/api/signup'); // GET = public config (no serverless-function slot to spare for a separate endpoint)
           const cfg = await resp.json();
           if (!cfg?.googleClientId) return; // not configured — no Google option, manual form only
           await loadScriptOnce('https://accounts.google.com/gsi/client');
