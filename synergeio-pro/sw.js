@@ -1,8 +1,9 @@
 // Service Worker για offline λειτουργία
-const CACHE_NAME = 'synergeio-pro-v30';
+const CACHE_NAME = 'synergeio-pro-v31';
 const ASSETS = [
   './',
   './index.html',
+  './app.html',
   './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png',

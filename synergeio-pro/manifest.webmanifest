@@ -2,7 +2,7 @@
   "name": "GearLog - Διαχείριση Service",
   "short_name": "GearLog",
   "description": "Εφαρμογή διαχείρισης πελατών, οχημάτων και service για συνεργεία αυτοκινήτων, μηχανών και σκαφών.",
-  "start_url": "/",
+  "start_url": "/app.html",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",
@@ -29,13 +29,13 @@
     {
       "name": "Νέο Service",
       "short_name": "Service",
-      "url": "/#/services/new",
+      "url": "/app.html#/services/new",
       "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
     },
     {
       "name": "Υπενθυμίσεις",
       "short_name": "Reminders",
-      "url": "/#/reminders",
+      "url": "/app.html#/reminders",
       "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
     }
   ]

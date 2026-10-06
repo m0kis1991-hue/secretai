@@ -18,6 +18,25 @@ async function safeJson(resp) {
   try { return text ? JSON.parse(text) : null; } catch (_) { return { message: text }; }
 }
 
+// Verifies a Google "Sign in with Google" ID token server-side, without a
+// client library (this project has no npm dependencies/build step — see
+// vercel.json). This is Google's own documented approach for backends that
+// don't use their client libraries: https://developers.google.com/identity/gsi/web/guides/verify-google-id-token
+async function verifyGoogleCredential(credential) {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  if (!clientId) return { ok: false, error: 'Η εγγραφή με Google δεν είναι διαθέσιμη αυτή τη στιγμή' };
+  if (!credential || typeof credential !== 'string') return { ok: false, error: 'Μη έγκυρο Google credential' };
+
+  const resp = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`);
+  const info = await safeJson(resp);
+  if (!resp.ok || !info) return { ok: false, error: 'Η επαλήθευση Google απέτυχε' };
+  if (info.aud !== clientId) return { ok: false, error: 'Μη έγκυρο Google credential (λάθος client)' };
+  if (info.email_verified !== 'true' && info.email_verified !== true) {
+    return { ok: false, error: 'Το email Google δεν είναι επιβεβαιωμένο' };
+  }
+  return { ok: true, email: info.email, name: info.name || info.given_name || '' };
+}
+
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -47,15 +66,28 @@ module.exports = async function handler(req, res) {
   }
 
   const workshopName = (body.workshop_name || '').toString().trim().slice(0, 120);
-  const contactName = (body.contact_name || '').toString().trim().slice(0, 120) || null;
   const phone = (body.phone || '').toString().trim().slice(0, 30);
-  const email = (body.email || '').toString().trim().slice(0, 200) || null;
+
+  // Two signup paths: a verified Google identity (contact_name/email come
+  // from Google, never trusted from the client), or plain form fields.
+  let contactName, email, signupSource;
+  if (body.google_credential) {
+    const g = await verifyGoogleCredential(body.google_credential);
+    if (!g.ok) return res.status(400).json({ error: g.error });
+    contactName = g.name || null;
+    email = g.email;
+    signupSource = 'Google';
+  } else {
+    contactName = (body.contact_name || '').toString().trim().slice(0, 120) || null;
+    email = (body.email || '').toString().trim().slice(0, 200) || null;
+    signupSource = 'φόρμα';
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ error: 'Μη έγκυρο email' });
+    }
+  }
 
   if (!workshopName) return res.status(400).json({ error: 'Το όνομα συνεργείου είναι υποχρεωτικό' });
   if (!phone) return res.status(400).json({ error: 'Το τηλέφωνο είναι υποχρεωτικό' });
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return res.status(400).json({ error: 'Μη έγκυρο email' });
-  }
 
   const baseUrl = `${supabaseUrl}/rest/v1/gearlog_clients`;
   const headers = {
@@ -73,7 +105,7 @@ module.exports = async function handler(req, res) {
     monthly_fee: 0,
     payment_day: 1,
     is_active: false,
-    notes: `Εγγραφή από φόρμα (self-signup) — ${new Date().toISOString().slice(0, 10)}`,
+    notes: `Εγγραφή από ${signupSource} (self-signup) — ${new Date().toISOString().slice(0, 10)}`,
   };
 
   for (let attempt = 0; attempt < 5; attempt++) {

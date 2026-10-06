@@ -5464,6 +5464,7 @@
           }
           await DB.setSetting('workshopId', code);
           await DB.setSetting('termsAcceptedAt', new Date().toISOString());
+          try { localStorage.setItem('gl_has_account', '1'); } catch (_) {}
           state.settings.workshopId = code;
           if (data.superadmin) {
             await DB.setSetting('workshopMode', 'admin');
@@ -5497,6 +5498,7 @@
         const localId = 'ws_demo_' + Date.now().toString(36);
         await DB.setSetting('workshopId', localId);
         await DB.setSetting('workshopMode', 'demo');
+        try { localStorage.setItem('gl_has_account', '1'); } catch (_) {}
         await DB.setSetting('termsAcceptedAt', new Date().toISOString());
         state.settings.workshopId = localId;
         state.settings.workshopMode = 'demo';
@@ -5509,10 +5511,14 @@
     }
 
     function renderSignupView() {
+      let googleCredential = null;
+
       el.innerHTML = box(`
         <img src="icon-192.png" style="width:64px;height:64px;border-radius:1rem;margin:0 auto 0.75rem;" />
         <div style="color:white;font-size:1.125rem;font-weight:700;margin-bottom:0.375rem">Δημιουργία Λογαριασμού</div>
         <div style="color:#94a3b8;font-size:0.8125rem;margin-bottom:1.25rem;line-height:1.6">Καταχωρήστε το συνεργείο σας. Θα ενεργοποιηθεί μόλις ολοκληρωθεί η πληρωμή της συνδρομής.</div>
+        <div id="g-signin-wrap"></div>
+        <div id="su-google-confirmed" class="hidden" style="color:#6ee7b7;font-size:0.75rem;background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);border-radius:0.5rem;padding:0.5rem 0.75rem;margin-bottom:0.75rem;text-align:left;"></div>
         <input id="su-name" type="text" placeholder="Όνομα Συνεργείου *"
           style="width:100%;box-sizing:border-box;background:#0f172a;border:1.5px solid #475569;border-radius:0.5rem;color:white;padding:0.7rem 0.9rem;font-size:0.9rem;outline:none;margin-bottom:0.5rem;" />
         <input id="su-contact" type="text" placeholder="Υπεύθυνος"
@@ -5541,6 +5547,59 @@
       const errEl = el.querySelector('#su-err');
       const submitBtn = el.querySelector('#su-submit');
       wireTerms('su-terms', submitBtn);
+      setupGoogleSignIn();
+
+      function loadScriptOnce(src) {
+        return new Promise((resolve, reject) => {
+          if (document.querySelector(`script[src="${src}"]`)) return resolve();
+          const s = document.createElement('script');
+          s.src = src;
+          s.onload = resolve;
+          s.onerror = reject;
+          document.head.appendChild(s);
+        });
+      }
+
+      async function setupGoogleSignIn() {
+        try {
+          const resp = await fetch('/api/config');
+          const cfg = await resp.json();
+          if (!cfg?.googleClientId) return; // not configured — no Google option, manual form only
+          await loadScriptOnce('https://accounts.google.com/gsi/client');
+          if (!window.google?.accounts?.id || !el.isConnected) return;
+          window.google.accounts.id.initialize({ client_id: cfg.googleClientId, callback: onGoogleCredential });
+          const wrap = el.querySelector('#g-signin-wrap');
+          if (!wrap) return;
+          wrap.innerHTML = `
+            <div id="g-signin-btn" style="display:flex;justify-content:center;margin-bottom:0.75rem;"></div>
+            <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;">
+              <div style="flex:1;height:1px;background:#334155;"></div>
+              <span style="color:#64748b;font-size:0.75rem;">ή</span>
+              <div style="flex:1;height:1px;background:#334155;"></div>
+            </div>`;
+          window.google.accounts.id.renderButton(el.querySelector('#g-signin-btn'), { theme: 'filled_blue', size: 'large', text: 'signup_with', width: 280 });
+        } catch (_) {
+          // Google script/config unavailable — manual signup still works fine.
+        }
+      }
+
+      function onGoogleCredential(response) {
+        googleCredential = response.credential;
+        let name = '', email = '';
+        try {
+          const payload = JSON.parse(atob(response.credential.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+          name = payload.name || '';
+          email = payload.email || '';
+        } catch (_) {}
+        contactInput.value = name;
+        contactInput.readOnly = true;
+        emailInput.value = email;
+        emailInput.readOnly = true;
+        const conf = el.querySelector('#su-google-confirmed');
+        conf.textContent = `✓ Συνδεδεμένος ως ${name} (${email}) — συμπληρώστε το όνομα συνεργείου και το τηλέφωνο για να ολοκληρωθεί η εγγραφή.`;
+        conf.classList.remove('hidden');
+        nameInput.focus();
+      }
 
       async function trySignup() {
         if (!termsAccepted) { errEl.textContent = 'Πρέπει να αποδεχτείτε τους Όρους Χρήσης και την Πολιτική Απορρήτου.'; return; }
@@ -5555,7 +5614,12 @@
           const resp = await fetch('/api/signup', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
+            body: JSON.stringify(googleCredential ? {
+              workshop_name: workshopName,
+              phone,
+              google_credential: googleCredential,
+              website: websiteInput.value,
+            } : {
               workshop_name: workshopName,
               contact_name: (contactInput.value || '').trim(),
               phone,
@@ -5573,6 +5637,7 @@
           await DB.setSetting('workshopId', data.workshopId);
           await DB.setSetting('workshopMode', 'licensed');
           await DB.setSetting('termsAcceptedAt', new Date().toISOString());
+          try { localStorage.setItem('gl_has_account', '1'); } catch (_) {}
           state.settings.workshopId = data.workshopId;
           renderConfirmView(data.workshopId, workshopName);
         } catch (_) {
