@@ -37,6 +37,54 @@ async function verifyGoogleCredential(credential) {
   return { ok: true, email: info.email, name: info.name || info.given_name || '' };
 }
 
+// Creates a Stripe Checkout Session for a recurring monthly subscription so
+// a self-signup customer can pay immediately instead of waiting for the
+// admin to log a manual payment. Returns null (never throws) if Stripe isn't
+// configured yet, or if session creation fails for any reason — signup
+// itself must never fail just because Stripe had a hiccup; the admin can
+// always activate manually as before.
+async function createStripeCheckoutSession({ clientId, workshopId, email, stripeCustomerId }) {
+  const secretKey = process.env.STRIPE_SECRET_KEY;
+  const priceId = process.env.STRIPE_PRICE_ID;
+  if (!secretKey || !priceId) return null;
+
+  const base = (process.env.PUBLIC_APP_URL || 'https://synergeio-pro.vercel.app').replace(/\/$/, '');
+  const params = new URLSearchParams();
+  params.append('mode', 'subscription');
+  params.append('line_items[0][price]', priceId);
+  params.append('line_items[0][quantity]', '1');
+  params.append('client_reference_id', clientId);
+  params.append('success_url', `${base}/app.html?stripe=success`);
+  params.append('cancel_url', `${base}/app.html?stripe=cancel`);
+  params.append('metadata[workshop_id]', workshopId);
+  params.append('subscription_data[metadata][workshop_id]', workshopId);
+  // Reuse the existing Stripe customer on a retry (e.g. a failed/canceled
+  // subscription paying again) instead of creating a duplicate customer —
+  // customer and customer_email are mutually exclusive on a Checkout Session.
+  if (stripeCustomerId) params.append('customer', stripeCustomerId);
+  else if (email) params.append('customer_email', email);
+
+  try {
+    const resp = await fetch('https://api.stripe.com/v1/checkout/sessions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${secretKey}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: params.toString(),
+    });
+    const data = await safeJson(resp);
+    if (!resp.ok) {
+      console.error('stripe checkout session error:', JSON.stringify(data));
+      return null;
+    }
+    return data?.url || null;
+  } catch (e) {
+    console.error('stripe checkout session exception:', e);
+    return null;
+  }
+}
+
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -128,7 +176,12 @@ module.exports = async function handler(req, res) {
       const data = await safeJson(resp);
       if (resp.ok) {
         const created = Array.isArray(data) ? data[0] : data;
-        return res.status(201).json({ workshopId: created.workshop_id, workshopName: created.workshop_name });
+        const checkoutUrl = await createStripeCheckoutSession({
+          clientId: created.id,
+          workshopId: created.workshop_id,
+          email,
+        });
+        return res.status(201).json({ workshopId: created.workshop_id, workshopName: created.workshop_name, checkoutUrl });
       }
       if (data?.code !== '23505') {
         console.error('signup insert error:', JSON.stringify(data));
@@ -142,3 +195,7 @@ module.exports = async function handler(req, res) {
   }
   return res.status(500).json({ error: 'Αποτυχία δημιουργίας μοναδικού κωδικού. Δοκιμάστε ξανά.' });
 };
+
+// Reused by api/license-check.js so a locked-out (unpaid) existing account
+// can retry payment directly, without a new signup.
+module.exports.createStripeCheckoutSession = createStripeCheckoutSession;

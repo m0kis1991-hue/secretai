@@ -5647,6 +5647,12 @@
           await DB.setSetting('termsAcceptedAt', new Date().toISOString());
           try { localStorage.setItem('gl_has_account', '1'); } catch (_) {}
           state.settings.workshopId = data.workshopId;
+          if (data.checkoutUrl) {
+            // Stripe is configured — pay now and activate immediately instead
+            // of waiting for the admin to log a manual payment.
+            location.href = data.checkoutUrl;
+            return;
+          }
           renderConfirmView(data.workshopId, workshopName);
         } catch (_) {
           errEl.textContent = 'Σφάλμα σύνδεσης. Ελέγξτε το internet σας.';
@@ -5836,13 +5842,13 @@
 
   // Reports ONLY anonymous counters (how many records exist, when the app was last
   // opened) so the super admin can see usage trends — never customer/vehicle names,
-  // plates, VINs, or any other business/personal data. See api/usage-ping.js.
+  // plates, VINs, or any other business/personal data. See api/license-check.js (POST branch).
   function pingUsageIfDue(workshopId) {
     if (!workshopId) return;
     let last = 0;
     try { last = Number(localStorage.getItem(USAGE_PING_KEY)) || 0; } catch (_) {}
     if (Date.now() - last < USAGE_PING_INTERVAL_MS) return;
-    fetch('/api/usage-ping', {
+    fetch('/api/license-check', { // POST = usage ping (folded in to stay within Vercel's function cap)
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -5859,6 +5865,26 @@
     }).then(() => {
       try { localStorage.setItem(USAGE_PING_KEY, String(Date.now())); } catch (_) {}
     }).catch(() => {});
+  }
+
+  let _justPaidViaStripe = false;
+
+  function handleStripeReturn() {
+    const params = new URLSearchParams(location.search);
+    const stripeStatus = params.get('stripe');
+    if (!stripeStatus) return;
+    if (stripeStatus === 'success') _justPaidViaStripe = true;
+
+    // Clean the URL so refreshing/sharing the link doesn't re-show the banner.
+    params.delete('stripe');
+    const cleanQs = params.toString();
+    history.replaceState(null, '', location.pathname + (cleanQs ? `?${cleanQs}` : '') + location.hash);
+
+    if (stripeStatus === 'success') {
+      U.toast('Η πληρωμή ολοκληρώθηκε! Ο λογαριασμός ενεργοποιείται — αν δεν ξεκλειδώσει αμέσως, περιμένετε λίγα δευτερόλεπτα και ανανεώστε.');
+    } else if (stripeStatus === 'cancel') {
+      U.toast('Η πληρωμή ακυρώθηκε. Μπορείτε να προσπαθήσετε ξανά όποτε θέλετε από τις Ρυθμίσεις.', 'error');
+    }
   }
 
   async function checkLicenseStatus() {
@@ -5886,7 +5912,20 @@
 
     try {
       const resp = await fetch(`/api/license-check?workshopId=${encodeURIComponent(workshopId)}`);
-      const data = await resp.json();
+      let data = await resp.json();
+
+      // Just redirected back from a successful Stripe Checkout — the webhook
+      // that flips is_active usually lands in well under a second, but can
+      // race the browser's own redirect. One short retry avoids flashing the
+      // "not active yet" lock screen right after the customer paid.
+      if (data.active === false && _justPaidViaStripe) {
+        _justPaidViaStripe = false;
+        await new Promise((r) => setTimeout(r, 2500));
+        try {
+          const retryResp = await fetch(`/api/license-check?workshopId=${encodeURIComponent(workshopId)}`);
+          data = await retryResp.json();
+        } catch (_) {}
+      }
 
       // Persist the result only when it comes from the server
       if (data.registered !== false && data.configured !== false) {
@@ -5957,6 +5996,10 @@
         <div style="color:white;font-size:1.25rem;font-weight:700">Ο λογαριασμός δεν είναι ενεργός</div>
         <div style="color:#94a3b8;font-size:0.875rem;max-width:320px;line-height:1.6">Αν μόλις εγγραφήκατε, ο λογαριασμός σας ενεργοποιείται μόλις ολοκληρωθεί η πληρωμή της συνδρομής. Αν είχατε ήδη πρόσβαση, η συνδρομή σας έχει λήξει ή ανασταλεί. Επικοινωνήστε με τον πάροχο.</div>
         ${data.workshopName ? `<div style="color:#475569;font-size:0.75rem">Συνεργείο: ${U.escape(data.workshopName)}</div>` : ''}
+        <button id="lic-pay-now" style="display:flex;align-items:center;justify-content:center;gap:0.5rem;background:#1d4ed8;color:white;font-weight:600;padding:0.625rem 1.25rem;border-radius:0.5rem;border:none;font-size:0.875rem;cursor:pointer;width:260px;">
+          ${icon('credit-card', 'w-4 h-4')} Πληρωμή Τώρα
+        </button>
+        <div id="lic-pay-err" style="color:#f87171;font-size:0.75rem;max-width:280px;"></div>
         <a href="https://wa.me/306982940193?text=${encodeURIComponent('Γεια σας, έκανα εγγραφή στο GearLog (' + (data.workshopName || '') + ') και θα ήθελα να ολοκληρώσω την πληρωμή.')}" target="_blank"
           style="display:flex;align-items:center;justify-content:center;gap:0.5rem;background:#22c55e;color:white;font-weight:600;padding:0.625rem 1.25rem;border-radius:0.5rem;text-decoration:none;font-size:0.875rem;">
           <svg style="width:1.1rem;height:1.1rem" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
@@ -5964,6 +6007,35 @@
         </a>
       `;
       document.body.appendChild(el);
+      refreshIcons();
+      document.getElementById('lic-pay-now').addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        const errEl = document.getElementById('lic-pay-err');
+        btn.disabled = true;
+        btn.textContent = '…';
+        errEl.textContent = '';
+        try {
+          const resp = await fetch('/api/license-check', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'retry_payment', workshopId: state.settings.workshopId }),
+          });
+          const payData = await resp.json().catch(() => null);
+          if (!resp.ok || !payData?.checkoutUrl) {
+            errEl.textContent = payData?.error || 'Η πληρωμή δεν είναι διαθέσιμη αυτή τη στιγμή.';
+            btn.disabled = false;
+            btn.innerHTML = `${icon('credit-card', 'w-4 h-4')} Πληρωμή Τώρα`;
+            refreshIcons();
+            return;
+          }
+          location.href = payData.checkoutUrl;
+        } catch (_) {
+          errEl.textContent = 'Σφάλμα σύνδεσης.';
+          btn.disabled = false;
+          btn.innerHTML = `${icon('credit-card', 'w-4 h-4')} Πληρωμή Τώρα`;
+          refreshIcons();
+        }
+      });
       return;
     }
 
@@ -6898,6 +6970,8 @@
     // Wait for the first render (which loads state.* from IndexedDB via loadAll())
     // before running checks that read that state — otherwise they'd see empty arrays.
     await router();
+
+    handleStripeReturn();
 
     // License check (runs once per session, non-blocking)
     checkLicenseStatus();
