@@ -8,8 +8,13 @@ module.exports = async function handler(req, res) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(503).json({ error: 'AI not configured on server' });
 
-  const body = req.body || {};
-  const parsed = typeof body === 'string' ? JSON.parse(body) : body;
+  let parsed;
+  try {
+    const body = req.body || {};
+    parsed = typeof body === 'string' ? JSON.parse(body) : body;
+  } catch (_) {
+    return res.status(400).json({ error: 'Μη έγκυρα δεδομένα αίτησης' });
+  }
   const { stats, vehicleTypes } = parsed;
 
   const prompt = `Είσαι έμπειρος σύμβουλος επιχείρησης για αυτοκινητιστικά συνεργεία στην Ελλάδα. Ανάλυσε τα παρακάτω δεδομένα και δώσε συγκεκριμένες, πρακτικές συμβουλές για την ανάπτυξη της επιχείρησης και προσέλκυση νέων πελατών.

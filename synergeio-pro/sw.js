@@ -1,5 +1,5 @@
 // Service Worker για offline λειτουργία
-const CACHE_NAME = 'synergeio-pro-v31';
+const CACHE_NAME = 'synergeio-pro-v32';
 const ASSETS = [
   './',
   './index.html',
@@ -11,7 +11,14 @@ const ASSETS = [
   'https://cdn.tailwindcss.com',
   'https://unpkg.com/lucide@latest/dist/umd/lucide.js',
   'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js',
-  'https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js'
+  'https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js',
+  // Precached explicitly (not just left to the runtime handler below): these
+  // load via a plain <script src> with no crossorigin attribute, so the
+  // browser's own request is no-cors and yields an opaque response the
+  // runtime handler can never cache (type !== 'basic'). Without this, PDF
+  // export (Chart.js/html2canvas-dependent) silently fails offline forever.
+  'https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js',
+  'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js'
 ];
 
 self.addEventListener('install', (event) => {

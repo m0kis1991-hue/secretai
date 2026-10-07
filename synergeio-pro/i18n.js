@@ -342,6 +342,8 @@ window.I18N = {
     install_app: 'Εγκατάσταση εφαρμογής',
     install_prompt: 'Εγκατέστησε την εφαρμογή στη συσκευή σου για γρήγορη πρόσβαση και offline λειτουργία.',
     install_later: 'Όχι τώρα',
+    demo_limit_reached: 'Λειτουργία Demo: μέχρι 3 δωρεάν καταχωρήσεις. Ενεργοποιήστε για απεριόριστη χρήση.',
+    service_cost: 'Κόστος (€)',
   },
   en: {
     app_name: 'GarageMate',
@@ -670,6 +672,8 @@ window.I18N = {
     install_app: 'Install app',
     install_prompt: 'Install the app on your device for quick access and offline mode.',
     install_later: 'Not now',
+    demo_limit_reached: 'Demo mode: up to 3 free entries. Activate for unlimited use.',
+    service_cost: 'Cost (€)',
   }
 };
 

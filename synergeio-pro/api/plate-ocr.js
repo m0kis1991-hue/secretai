@@ -8,12 +8,18 @@ module.exports = async function handler(req, res) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(503).json({ error: 'AI not configured' });
 
-  const body = req.body || {};
-  const parsed = typeof body === 'string' ? JSON.parse(body) : body;
-  const imageDataUrl = parsed.imageDataUrl;
-  if (!imageDataUrl) return res.status(400).json({ error: 'Missing image' });
-
-  const [header, b64] = imageDataUrl.split(',');
+  let header, b64;
+  try {
+    const body = req.body || {};
+    const parsed = typeof body === 'string' ? JSON.parse(body) : body;
+    const imageDataUrl = parsed.imageDataUrl;
+    if (typeof imageDataUrl !== 'string' || !imageDataUrl.includes(',')) {
+      return res.status(400).json({ error: 'Missing image' });
+    }
+    [header, b64] = imageDataUrl.split(',');
+  } catch (_) {
+    return res.status(400).json({ error: 'Μη έγκυρα δεδομένα αίτησης' });
+  }
   const mediaType = (header && header.match(/:(.*?);/)?.[1]) || 'image/jpeg';
 
   try {

@@ -54,6 +54,14 @@ async function handleLicenseCheck(req, res) {
     );
     const data = await resp.json();
 
+    if (!resp.ok) {
+      // A real Supabase failure (bad key, RLS, outage) must not look identical
+      // to "this workshop was never registered" — same fail-open response as
+      // the network-error catch below, but logged so it's actually diagnosable.
+      console.error('license-check lookup error:', JSON.stringify(data));
+      return res.status(200).json({ active: true, configured: false });
+    }
+
     if (!Array.isArray(data) || !data.length) {
       return res.status(200).json({ active: true, registered: false });
     }
@@ -99,6 +107,10 @@ async function handleRetryPayment(req, res, body) {
       { headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` } }
     );
     const data = await resp.json();
+    if (!resp.ok) {
+      console.error('retry-payment lookup error:', JSON.stringify(data));
+      return res.status(502).json({ error: 'Σφάλμα βάσης δεδομένων. Δοκιμάστε ξανά.' });
+    }
     const client = Array.isArray(data) && data[0] ? data[0] : null;
     if (!client) return res.status(404).json({ error: 'Δεν βρέθηκε ο λογαριασμός' });
     if (client.is_active) return res.status(400).json({ error: 'Ο λογαριασμός είναι ήδη ενεργός' });

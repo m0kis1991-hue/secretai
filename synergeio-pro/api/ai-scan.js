@@ -76,23 +76,28 @@ module.exports = async function handler(req, res) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(503).json({ error: 'AI not configured on server' });
 
-  const body = req.body || {};
-  const parsed = typeof body === 'string' ? JSON.parse(body) : body;
-
-  const regUrls = parsed.imageDataUrls || (parsed.imageDataUrl ? [parsed.imageDataUrl] : []);
-  const odoUrl = parsed.odometerDataUrl || null;
-  if (!regUrls.length) return res.status(400).json({ error: 'Missing image(s)' });
-
   function urlToBlock(url) {
+    if (typeof url !== 'string' || !url.includes(',')) throw new Error('Invalid image data URL');
     const [header, b64] = url.split(',');
     const mediaType = (header && header.match(/:(.*?);/)?.[1]) || 'image/jpeg';
     return { type: 'image', source: { type: 'base64', media_type: mediaType, data: b64 } };
   }
 
-  const imageBlocks = regUrls.map(urlToBlock);
-  if (odoUrl) imageBlocks.push(urlToBlock(odoUrl));
+  let imageBlocks, prompt;
+  try {
+    const body = req.body || {};
+    const parsed = typeof body === 'string' ? JSON.parse(body) : body;
 
-  const prompt = REG_PROMPT + JSON_TEMPLATE + (odoUrl ? ODO_SUFFIX : '');
+    const regUrls = parsed.imageDataUrls || (parsed.imageDataUrl ? [parsed.imageDataUrl] : []);
+    const odoUrl = parsed.odometerDataUrl || null;
+    if (!Array.isArray(regUrls) || !regUrls.length) return res.status(400).json({ error: 'Missing image(s)' });
+
+    imageBlocks = regUrls.map(urlToBlock);
+    if (odoUrl) imageBlocks.push(urlToBlock(odoUrl));
+    prompt = REG_PROMPT + JSON_TEMPLATE + (odoUrl ? ODO_SUFFIX : '');
+  } catch (e) {
+    return res.status(400).json({ error: 'Μη έγκυρα δεδομένα εικόνας' });
+  }
 
   try {
     const response = await fetch('https://api.anthropic.com/v1/messages', {

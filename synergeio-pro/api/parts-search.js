@@ -162,7 +162,12 @@ module.exports = async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).end();
 
-  const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+  let body;
+  try {
+    body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+  } catch (_) {
+    return res.status(400).json({ error: 'Invalid request body' });
+  }
   const { query, brand, model, year, oemRef } = body;
   if (!query) return res.status(400).json({ error: 'Missing query' });
 

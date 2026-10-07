@@ -113,6 +113,19 @@ window.DB = (function () {
   }
 
   async function importAll(data) {
+    // Validate everything BEFORE touching any store. Each store is cleared
+    // before being repopulated with no rollback, so a malformed record
+    // discovered mid-loop would otherwise leave that store (and any store
+    // already processed before it) wiped with only a partial replacement —
+    // validating first means a bad backup fails loudly with nothing deleted.
+    for (const s of STORES) {
+      if (!Array.isArray(data[s])) continue;
+      data[s].forEach((item, i) => {
+        if (!item || typeof item !== 'object' || !item.id) {
+          throw new Error(`Μη έγκυρη εγγραφή στο "${s}" (#${i + 1}) — λείπει αναγνωριστικό (id).`);
+        }
+      });
+    }
     for (const s of STORES) {
       if (Array.isArray(data[s])) {
         await clear(s);

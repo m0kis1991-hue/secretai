@@ -223,6 +223,23 @@
     return parts + labor;
   }
 
+  // Completed Job Orders are real, billed work — count them as revenue too,
+  // alongside Services. Pending/in-progress ones are excluded (not yet
+  // realized revenue). Mirrors the Job-Order-detail screen's own
+  // calcTotalCost math (parts total + flat labor cost).
+  function jobOrderRevenue(jo) {
+    if (jo.status !== 'completed') return 0;
+    // A job order auto-created from a Service (the old serviceId link, no
+    // longer created going forward but still present on existing records)
+    // represents work the linked service's own svcRevenue() already counts —
+    // counting it again here would double it.
+    if (jo.serviceId) return 0;
+    const hasPartsOrLabor = (Array.isArray(jo.workParts) && jo.workParts.length > 0) || jo.laborCost != null;
+    if (!hasPartsOrLabor) return Number(jo.actualCost ?? jo.estimatedCost) || 0; // pre-parts/labor-tracking schema
+    const parts = (jo.workParts || []).reduce((sum, p) => sum + (Number(p.qty)||0)*(Number(p.price)||0), 0);
+    return parts + (Number(jo.laborCost) || 0);
+  }
+
   function vehicleIcon(type) {
     switch (type) {
       case 'moto': return 'bike';
@@ -463,8 +480,10 @@
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const yearStart  = new Date(now.getFullYear(), 0, 1);
-    const revenueThisMonth = state.services.filter((sv) => sv.date && new Date(sv.date) >= monthStart).reduce((s, sv) => s + svcRevenue(sv), 0);
-    const revenueThisYear  = state.services.filter((sv) => sv.date && new Date(sv.date) >= yearStart).reduce((s, sv) => s + svcRevenue(sv), 0);
+    const revenueThisMonth = state.services.filter((sv) => sv.date && new Date(sv.date) >= monthStart).reduce((s, sv) => s + svcRevenue(sv), 0)
+      + state.jobOrders.filter((j) => j.completedAt && new Date(j.completedAt) >= monthStart).reduce((s, j) => s + jobOrderRevenue(j), 0);
+    const revenueThisYear  = state.services.filter((sv) => sv.date && new Date(sv.date) >= yearStart).reduce((s, sv) => s + svcRevenue(sv), 0)
+      + state.jobOrders.filter((j) => j.completedAt && new Date(j.completedAt) >= yearStart).reduce((s, j) => s + jobOrderRevenue(j), 0);
     const sym = { EUR: '€', USD: '$', GBP: '£' }[state.settings.currency || 'EUR'] || '€';
     const fmtRev = (n) => sym + U.fmtNum(n);
 
@@ -971,7 +990,9 @@
 
     // Customer stats
     const cSvcs = state.services.filter((sv) => vs.some((v) => v.id === sv.vehicleId));
-    const totalSpent = cSvcs.reduce((sum, sv) => sum + svcRevenue(sv), 0);
+    const cJobOrders = state.jobOrders.filter((j) => vs.some((v) => v.id === j.vehicleId));
+    const totalSpent = cSvcs.reduce((sum, sv) => sum + svcRevenue(sv), 0)
+      + cJobOrders.reduce((sum, j) => sum + jobOrderRevenue(j), 0);
     const lastSvc = cSvcs.slice().sort((a, b) => new Date(b.date) - new Date(a.date))[0];
     const sym = { EUR: '€', USD: '$', GBP: '£' }[state.settings.currency || 'EUR'] || '€';
     const sinceDate = c.createdAt ? U.fmtDate(c.createdAt) : '—';
@@ -1146,7 +1167,7 @@
       e.preventDefault();
       const data = formData(e.target);
       if (!id && state.settings.workshopMode === 'demo' && state.customers.filter((c) => !c.id.startsWith('demo-')).length >= 3) {
-        U.toast('Λειτουργία Demo: μέχρι 3 δωρεάν καταχωρήσεις. Ενεργοποιήστε για απεριόριστη χρήση.', 'error');
+        U.toast(t('demo_limit_reached'), 'error');
         return;
       }
       if (id) data.id = id;
@@ -1283,7 +1304,7 @@
       const d = new Date(s.date);
       const mi = months.findIndex((m) => m.year === d.getFullYear() && m.month === d.getMonth());
       if (mi >= 0) {
-        months[mi].total += 0;
+        months[mi].total += svcRevenue(s);
       }
     });
 
@@ -1622,7 +1643,7 @@
 
     $('#view').innerHTML = `
       ${pageHeader(id ? t('edit') + ' ' + t('vehicle') : t('new_vehicle'), {
-        actions: !id ? `<a href="#/scan" class="px-3 py-1.5 rounded-lg bg-purple-500 hover:bg-purple-600 text-white text-sm font-medium flex items-center gap-1">${icon('scan-line','w-4 h-4')} AI</a>` : ''
+        actions: !id ? `<a href="#/scan${prefCustomer ? '?customer=' + encodeURIComponent(prefCustomer) : ''}" class="px-3 py-1.5 rounded-lg bg-purple-500 hover:bg-purple-600 text-white text-sm font-medium flex items-center gap-1">${icon('scan-line','w-4 h-4')} AI</a>` : ''
       })}
       <div class="max-w-2xl mx-auto p-4 pb-24 sm:pb-4">
         <form id="vehicle-form" class="space-y-4">
@@ -1817,7 +1838,7 @@
       e.preventDefault();
       const data = formData(e.target);
       if (!id && state.settings.workshopMode === 'demo' && state.vehicles.filter((v) => !v.id.startsWith('demo-')).length >= 3) {
-        U.toast('Λειτουργία Demo: μέχρι 3 δωρεάν καταχωρήσεις. Ενεργοποιήστε για απεριόριστη χρήση.', 'error');
+        U.toast(t('demo_limit_reached'), 'error');
         return;
       }
       if (data.year) data.year = String(data.year);
@@ -1904,6 +1925,7 @@
             ${kv(t('customer'), c ? `<a class="text-blue-700 dark:text-blue-500" href="#/customers/${c.id}">${U.escape(c.name)}</a>` : '—', true)}
             ${kv(t('service_mileage'), s.mileage ? s.mileage + ' km' : '')}
             ${kv(t('service_mechanic'), s.mechanic)}
+            ${svcRevenue(s) ? kv(t('service_cost'), U.fmtMoney(svcRevenue(s), state.settings.currency)) : ''}
           </div>
         </div>
 
@@ -2013,6 +2035,8 @@
             ${formField('date', t('service_date'), s.date ? s.date.slice(0,10) : U.localDateStr(), { type: 'date', required: true })}
             ${formField('mileage', t('service_mileage'), s.mileage, { type: 'number', voice: true })}
           </div>
+
+          ${formField('cost', t('service_cost'), s.cost, { type: 'number', step: '0.01', voice: true, placeholder: '0.00' })}
 
           <div class="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-900/40 rounded-xl p-4">
             <div class="flex items-center justify-between mb-2">
@@ -2194,12 +2218,17 @@
 
     $('#service-form').addEventListener('submit', async (e) => {
       e.preventDefault();
+      if (!id && state.settings.workshopMode === 'demo' && state.services.filter((sv) => !sv.id.startsWith('demo-')).length >= 3) {
+        U.toast(t('demo_limit_reached'), 'error');
+        return;
+      }
       const data = formData(e.target);
       const standardTasks = Array.from($('#svc-tasks-grid').querySelectorAll('input[type=checkbox]:checked')).map((cb) => cb.dataset.task);
       const customTasks = Array.from($$('.svc-custom-input')).map((inp) => inp.value.trim()).filter(Boolean).map((v) => 'custom:' + v);
       data.checklist = [...standardTasks, ...customTasks];
       if (data.mileage) data.mileage = Number(data.mileage);
       if (data.nextServiceMileage) data.nextServiceMileage = Number(data.nextServiceMileage);
+      if (data.cost) data.cost = Number(data.cost);
       if (id) data.id = id;
       // auto compute nextServiceDate if blank
       if (!data.nextServiceDate && data.date) {
@@ -2217,27 +2246,8 @@
         }
       }
 
-      // Auto-create job order from service tasks
-      if (data.checklist && data.checklist.length) {
-        const veh = vehicleById(data.vehicleId);
-        const joData = {
-          vehicleId: data.vehicleId,
-          customerId: veh?.customerId || null,
-          tasks: data.checklist,
-          notes: data.description || '',
-          status: 'pending',
-          completedTasks: {},
-          serviceId: saved.id,
-          createdAt: new Date().toISOString(),
-        };
-        const savedJo = await DB.add('job_orders', joData);
-        await loadAll();
-        U.toast('Εντολή εργασίας δημιουργήθηκε');
-        go('/job-orders/' + savedJo.id + '/work');
-      } else {
-        U.toast(t('saved'));
-        go('/services/' + saved.id);
-      }
+      U.toast(t('saved'));
+      go('/services/' + saved.id);
     });
   }
 
@@ -2539,6 +2549,10 @@
   async function renderAIScan() {
     // photos[0]=εξώφυλλο, photos[1]=στοιχεία οχήματος, photos[2]=ονομαστικά, photos[3]=odometer
     const photos = [null, null, null, null];
+    // Carried over from "+ New vehicle" on a customer's page (#/vehicles/new?customer=X
+    // → #/scan?customer=X) so applyAndGo() can send the vehicle back to that same
+    // customer instead of losing the context and creating a duplicate customer record.
+    const scanPrefCustomer = new URLSearchParams(location.hash.split('?')[1] || '').get('customer');
 
     function photoSlot(idx, label, borderColor, bgColor, btnColor, btnHover) {
       return `
@@ -2716,12 +2730,17 @@
       function applyAndGo(includeOwner) {
         const payload = { ...scanData, regPhoto: photos[0] };
         sessionStorage.setItem('ai_scan_result', JSON.stringify(payload));
-        if (includeOwner && scanData.ownerName) {
+        // A customer was already picked before scanning (came from their page's
+        // "+ New vehicle") — keep using that one. Never spawn a second customer
+        // record for the same person just because the scan also read an owner name.
+        if (scanPrefCustomer) {
+          sessionStorage.removeItem('ai_scan_customer_name');
+        } else if (includeOwner && scanData.ownerName) {
           sessionStorage.setItem('ai_scan_customer_name', scanData.ownerName);
         } else {
           sessionStorage.removeItem('ai_scan_customer_name');
         }
-        go('/vehicles/new');
+        go('/vehicles/new' + (scanPrefCustomer ? '?customer=' + encodeURIComponent(scanPrefCustomer) : ''));
       }
 
       function inp(name, value, type = 'text', cls = '') {
@@ -2767,14 +2786,14 @@
               </div>` : ''}
             <div class="grid grid-cols-2 gap-3 text-sm">
               ${ownerBlock}
-              ${kv('Αριθμός Κυκλοφορίας', d.plate)}
-              ${kv('Αριθμός Πλαισίου (VIN)', d.vin, true)}
-              ${kv(t('vehicle_brand'), d.brand)}
-              ${kv(t('vehicle_model'), d.model)}
-              ${kv(t('vehicle_year'), d.year)}
-              ${kv('Κυβισμός', d.engine ? d.engine + ' cc' : '')}
+              ${kv('Αριθμός Κυκλοφορίας', U.escape(d.plate))}
+              ${kv('Αριθμός Πλαισίου (VIN)', U.escape(d.vin), true)}
+              ${kv(t('vehicle_brand'), U.escape(d.brand))}
+              ${kv(t('vehicle_model'), U.escape(d.model))}
+              ${kv(t('vehicle_year'), U.escape(d.year))}
+              ${kv('Κυβισμός', d.engine ? U.escape(d.engine) + ' cc' : '')}
               ${kv('Καύσιμο', d.fuel ? t('fuel_' + d.fuel) : '')}
-              ${kv('Χρώμα', d.color)}
+              ${kv('Χρώμα', U.escape(d.color))}
               ${d.mileage ? kv('Χιλιόμετρα', Number(d.mileage).toLocaleString() + ' km') : ''}
             </div>
             ${d.ownerName ? `
@@ -2982,7 +3001,11 @@
 
     const tomorrow = new Date(Date.now() + 86400000);
     tomorrow.setHours(17, 0, 0, 0);
-    const defaultDelivery = tomorrow.toISOString().slice(0, 16);
+    // A <input type="datetime-local"> value is literal local wall-clock time
+    // with no timezone conversion — toISOString() would convert to UTC and
+    // default the field to the wrong hour outside UTC+0 (e.g. 2-3h early in Greece).
+    const pad = (n) => String(n).padStart(2, '0');
+    const defaultDelivery = `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}T${pad(tomorrow.getHours())}:${pad(tomorrow.getMinutes())}`;
 
     $('#view').innerHTML = `
       ${pageHeader(id ? t('edit') + ' ' + t('job_order') : t('new_job_order'))}
@@ -3089,6 +3112,10 @@
     });
 
     $('#save-jo').addEventListener('click', async () => {
+      if (!id && state.settings.workshopMode === 'demo' && state.jobOrders.filter((j) => !j.id.startsWith('demo-')).length >= 3) {
+        U.toast(t('demo_limit_reached'), 'error');
+        return;
+      }
       const vehicleId = $('#jo-vehicle').value;
       if (!vehicleId) { U.toast(t('jo_select_vehicle'), 'error'); return; }
 
@@ -4139,7 +4166,7 @@
         <span style="font-size:15px;color:${statusColor};flex-shrink:0;">${statusIcon}</span>
         <div style="font-size:11.5px;">
           <div${unable ? ' style="color:#ef4444;"' : ''}>${U.escape(label)}</div>
-          ${unable ? `<div style="font-size:10px;color:#ef4444;font-style:italic;">Δεν εκτελέστηκε${unable !== '—' ? ': ' + U.escape(unable) : ''}</div>` : ''}
+          ${unable ? `<div style="font-size:10px;color:#ef4444;font-style:italic;">${isEl ? 'Δεν εκτελέστηκε' : 'Not completed'}${unable !== '—' ? ': ' + U.escape(unable) : ''}</div>` : ''}
         </div>
       </div>`;
     }).join('');
@@ -4228,38 +4255,38 @@
 
         ${jo.showCostOnReport !== false && ((jo.workParts || []).length > 0 || jo.laborCost) ? `
         <div style="margin-bottom:20px;">
-          <div style="font-size:9.5px;font-weight:700;color:#64748b;letter-spacing:1px;padding-bottom:5px;border-bottom:2px solid #e2e8f0;margin-bottom:8px;">ΑΝΤΑΛΛΑΚΤΙΚΑ &amp; ΚΟΣΤΟΣ</div>
+          <div style="font-size:9.5px;font-weight:700;color:#64748b;letter-spacing:1px;padding-bottom:5px;border-bottom:2px solid #e2e8f0;margin-bottom:8px;">${isEl ? 'ΑΝΤΑΛΛΑΚΤΙΚΑ &amp; ΚΟΣΤΟΣ' : 'PARTS &amp; COST'}</div>
           <table style="width:100%;border-collapse:collapse;font-size:11px;">
             <thead>
               <tr style="background:#f8fafc;">
-                <th style="text-align:left;padding:5px 8px;color:#64748b;font-weight:600;">Ανταλλακτικό</th>
-                <th style="text-align:center;padding:5px 8px;color:#64748b;font-weight:600;width:60px;">Ποσ.</th>
-                <th style="text-align:right;padding:5px 8px;color:#64748b;font-weight:600;width:70px;">Τιμή</th>
-                <th style="text-align:right;padding:5px 8px;color:#64748b;font-weight:600;width:70px;">Σύνολο</th>
+                <th style="text-align:left;padding:5px 8px;color:#64748b;font-weight:600;">${isEl ? 'Ανταλλακτικό' : 'Part'}</th>
+                <th style="text-align:center;padding:5px 8px;color:#64748b;font-weight:600;width:60px;">${isEl ? 'Ποσ.' : 'Qty'}</th>
+                <th style="text-align:right;padding:5px 8px;color:#64748b;font-weight:600;width:70px;">${isEl ? 'Τιμή' : 'Price'}</th>
+                <th style="text-align:right;padding:5px 8px;color:#64748b;font-weight:600;width:70px;">${isEl ? 'Σύνολο' : 'Total'}</th>
               </tr>
             </thead>
             <tbody>
               ${(jo.workParts || []).map((p) => {
-                const lt = ((Number(p.qty)||0)*(Number(p.price)||0)).toFixed(2);
                 return `<tr style="border-bottom:1px solid #f1f5f9;">
                   <td style="padding:5px 8px;">${U.escape(p.name)}</td>
                   <td style="text-align:center;padding:5px 8px;">${Number(p.qty)||0}</td>
-                  <td style="text-align:right;padding:5px 8px;">€${Number(p.price||0).toFixed(2)}</td>
-                  <td style="text-align:right;padding:5px 8px;font-weight:600;">€${lt}</td>
+                  <td style="text-align:right;padding:5px 8px;">${U.fmtMoney(Number(p.price)||0, state.settings.currency)}</td>
+                  <td style="text-align:right;padding:5px 8px;font-weight:600;">${U.fmtMoney((Number(p.qty)||0)*(Number(p.price)||0), state.settings.currency)}</td>
                 </tr>`;
               }).join('')}
               ${jo.laborCost ? `<tr style="border-bottom:1px solid #f1f5f9;background:#f8fafc;">
-                <td colspan="3" style="padding:5px 8px;font-style:italic;color:#475569;">Κόστος εργασίας</td>
-                <td style="text-align:right;padding:5px 8px;font-weight:600;">€${Number(jo.laborCost).toFixed(2)}</td>
+                <td colspan="3" style="padding:5px 8px;font-style:italic;color:#475569;">${isEl ? 'Κόστος εργασίας' : 'Labor cost'}</td>
+                <td style="text-align:right;padding:5px 8px;font-weight:600;">${U.fmtMoney(Number(jo.laborCost), state.settings.currency)}</td>
               </tr>` : ''}
             </tbody>
           </table>
           <div style="display:flex;justify-content:flex-end;margin-top:8px;">
             <div style="background:#d1fae5;border:1.5px solid #6ee7b7;border-radius:8px;padding:8px 16px;text-align:right;">
-              <div style="font-size:9.5px;color:#065f46;font-weight:700;letter-spacing:0.5px;margin-bottom:2px;">ΣΥΝΟΛΙΚΟ ΚΟΣΤΟΣ</div>
-              <div style="font-size:16px;font-weight:800;color:#065f46;">€${(
-                (jo.workParts||[]).reduce((s,p)=>s+(Number(p.qty)||0)*(Number(p.price)||0),0)+(Number(jo.laborCost)||0)
-              ).toFixed(2)}</div>
+              <div style="font-size:9.5px;color:#065f46;font-weight:700;letter-spacing:0.5px;margin-bottom:2px;">${isEl ? 'ΣΥΝΟΛΙΚΟ ΚΟΣΤΟΣ' : 'TOTAL COST'}</div>
+              <div style="font-size:16px;font-weight:800;color:#065f46;">${U.fmtMoney(
+                (jo.workParts||[]).reduce((s,p)=>s+(Number(p.qty)||0)*(Number(p.price)||0),0)+(Number(jo.laborCost)||0),
+                state.settings.currency
+              )}</div>
             </div>
           </div>
         </div>
@@ -4325,9 +4352,10 @@
     const completedJOs = (state.jobOrders || []).filter((j) => j.status === 'completed').length;
     const pendingJOs = totalJOs - completedJOs;
 
-    // Revenue from services (parts + labor)
+    // Revenue from services + completed job orders (parts + labor)
     let totalRevenue = 0;
     for (const sv of state.services) totalRevenue += svcRevenue(sv);
+    for (const jo of state.jobOrders) totalRevenue += jobOrderRevenue(jo);
 
     // Avg services per vehicle
     const avgSvcPerVehicle = totalVehicles ? (totalServices / totalVehicles).toFixed(1) : 0;
@@ -4444,20 +4472,21 @@
           return `<span class="text-xs px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 font-medium">Χαμηλή προτεραιότητα</span>`;
         };
 
-        const scoreColor = data.score >= 7 ? 'text-emerald-600' : data.score >= 5 ? 'text-amber-600' : 'text-red-600';
-        const scoreBg = data.score >= 7 ? 'bg-emerald-100 dark:bg-emerald-900/30' : data.score >= 5 ? 'bg-amber-100 dark:bg-amber-900/30' : 'bg-red-100 dark:bg-red-900/30';
+        const score = Number.isFinite(Number(data.score)) ? Number(data.score) : null;
+        const scoreColor = score >= 7 ? 'text-emerald-600' : score >= 5 ? 'text-amber-600' : 'text-red-600';
+        const scoreBg = score >= 7 ? 'bg-emerald-100 dark:bg-emerald-900/30' : score >= 5 ? 'bg-amber-100 dark:bg-amber-900/30' : 'bg-red-100 dark:bg-red-900/30';
 
         const result = $('#advisor-result');
         result.innerHTML = `
           ${data.summary ? `
           <div class="bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-800 rounded-xl p-4 flex items-start gap-3">
-            <div class="w-12 h-12 ${scoreBg} rounded-xl flex items-center justify-center flex-shrink-0 font-bold text-lg ${scoreColor}">${data.score}/10</div>
+            <div class="w-12 h-12 ${scoreBg} rounded-xl flex items-center justify-center flex-shrink-0 font-bold text-lg ${scoreColor}">${score != null ? score + '/10' : '—'}</div>
             <div>
               <div class="text-xs font-semibold text-violet-600 dark:text-violet-400 mb-1 uppercase tracking-wide">Αξιολόγηση</div>
               <p class="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">${U.escape(data.summary)}</p>
             </div>
           </div>` : ''}
-          ${(data.advice || []).map((a, i) => `
+          ${(Array.isArray(data.advice) ? data.advice : []).map((a, i) => `
             <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-2">
               <div class="flex items-start justify-between gap-2">
                 <div class="flex items-center gap-2">
@@ -4751,6 +4780,10 @@
       overlay.addEventListener('click', (e) => { if (e.target === overlay) closeOv(); });
 
       overlay.querySelector('#af-save').addEventListener('click', async () => {
+        if (!isEdit && state.settings.workshopMode === 'demo' && state.appointments.filter((a) => !a.id.startsWith('demo-')).length >= 3) {
+          U.toast(t('demo_limit_reached'), 'error');
+          return;
+        }
         const date = overlay.querySelector('#af-date').value;
         const time = overlay.querySelector('#af-time').value;
         const customerId = custSel.value;
@@ -4807,13 +4840,20 @@
       const entry = months.find((m) => m.year === d.getFullYear() && m.month === d.getMonth());
       if (entry) { entry.revenue += svcRevenue(sv); entry.count++; }
     });
+    state.jobOrders.forEach((jo) => {
+      if (!jo.completedAt || jo.serviceId) return; // serviceId-linked: already counted via its Service
+      const d = new Date(jo.completedAt);
+      const entry = months.find((m) => m.year === d.getFullYear() && m.month === d.getMonth());
+      if (entry) { entry.revenue += jobOrderRevenue(jo); entry.count++; }
+    });
 
     const totalRevenue12 = months.reduce((s, m) => s + m.revenue, 0);
     const activeMths = months.filter((m) => m.count > 0);
     const avgMonthRev = activeMths.length ? totalRevenue12 / activeMths.length : 0;
     const bestMonth = months.reduce((a, b) => (a.revenue > b.revenue ? a : b), months[0]);
     const thisMonthRev = months[months.length - 1].revenue;
-    const thisYearRev = state.services.filter((sv) => sv.date && new Date(sv.date) >= thisYearStart).reduce((sum, sv) => sum + svcRevenue(sv), 0);
+    const thisYearRev = state.services.filter((sv) => sv.date && new Date(sv.date) >= thisYearStart).reduce((sum, sv) => sum + svcRevenue(sv), 0)
+      + state.jobOrders.filter((jo) => jo.completedAt && new Date(jo.completedAt) >= thisYearStart).reduce((sum, jo) => sum + jobOrderRevenue(jo), 0);
 
     // Service type breakdown
     const typeCounts = {};
@@ -4833,6 +4873,12 @@
       if (!mechStats[m]) mechStats[m] = { count: 0, revenue: 0 };
       mechStats[m].count++;
       mechStats[m].revenue += svcRevenue(sv);
+    });
+    state.jobOrders.filter((jo) => jo.status === 'completed' && !jo.serviceId).forEach((jo) => {
+      const m = jo.mechanic || '—';
+      if (!mechStats[m]) mechStats[m] = { count: 0, revenue: 0 };
+      mechStats[m].count++;
+      mechStats[m].revenue += jobOrderRevenue(jo);
     });
     const topMechanics = Object.entries(mechStats).sort((a, b) => b[1].revenue - a[1].revenue).slice(0, 5);
 
@@ -5700,6 +5746,18 @@
     document.body.appendChild(el);
   }
 
+  function showUpdateBanner() {
+    if (document.getElementById('update-banner')) return;
+    const el = document.createElement('div');
+    el.id = 'update-banner';
+    el.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:9997;background:#1d4ed8;color:white;padding:0.75rem 1rem;display:flex;align-items:center;justify-content:center;gap:0.75rem;flex-wrap:wrap;';
+    el.innerHTML = `
+      <span style="font-size:0.8125rem;font-weight:600;">Νέα έκδοση της εφαρμογής είναι διαθέσιμη.</span>
+      <button onclick="location.reload()" style="background:white;color:#1d4ed8;padding:0.375rem 0.875rem;border-radius:0.375rem;border:none;font-size:0.8125rem;font-weight:700;cursor:pointer;">Ανανέωση</button>
+    `;
+    document.body.appendChild(el);
+  }
+
   async function seedDemoData() {
     const t0 = new Date();
     function ago(days) {
@@ -5996,7 +6054,7 @@
         <div style="color:white;font-size:1.25rem;font-weight:700">Ο λογαριασμός δεν είναι ενεργός</div>
         <div style="color:#94a3b8;font-size:0.875rem;max-width:320px;line-height:1.6">Αν μόλις εγγραφήκατε, ο λογαριασμός σας ενεργοποιείται μόλις ολοκληρωθεί η πληρωμή της συνδρομής. Αν είχατε ήδη πρόσβαση, η συνδρομή σας έχει λήξει ή ανασταλεί. Επικοινωνήστε με τον πάροχο.</div>
         ${data.workshopName ? `<div style="color:#475569;font-size:0.75rem">Συνεργείο: ${U.escape(data.workshopName)}</div>` : ''}
-        <button id="lic-pay-now" style="display:flex;align-items:center;justify-content:center;gap:0.5rem;background:#1d4ed8;color:white;font-weight:600;padding:0.625rem 1.25rem;border-radius:0.5rem;border:none;font-size:0.875rem;cursor:pointer;width:260px;">
+        <button id="lic-pay-now" style="display:flex;align-items:center;justify-content:center;gap:0.5rem;background:#1d4ed8;color:white;font-weight:600;padding:0.625rem 1.25rem;border-radius:0.5rem;border:none;font-size:0.875rem;cursor:pointer;width:100%;max-width:260px;box-sizing:border-box;">
           ${icon('credit-card', 'w-4 h-4')} Πληρωμή Τώρα
         </button>
         <div id="lic-pay-err" style="color:#f87171;font-size:0.75rem;max-width:280px;"></div>
@@ -6699,7 +6757,17 @@
       const msg = `Θα αντικατασταθούν ΟΛΕΣ οι τρέχουσες εγγραφές με τα δεδομένα του backup${counts ? ' (' + counts + ')' : ''}.\n\nΣυνέχεια;`;
       if (!confirm(msg)) return;
       try {
+        // A backup's own settings store carries whatever workshopId/workshopMode
+        // was active on the device it was exported from. Importing it must not
+        // re-point THIS device's subscription/license binding to that one —
+        // only business data and cosmetic settings should come from the backup.
+        const keepWorkshopId = state.settings.workshopId;
+        const keepWorkshopMode = state.settings.workshopMode;
+        const keepTermsAcceptedAt = state.settings.termsAcceptedAt;
         await DB.importAll(data);
+        if (keepWorkshopId) await DB.setSetting('workshopId', keepWorkshopId);
+        if (keepWorkshopMode) await DB.setSetting('workshopMode', keepWorkshopMode);
+        if (keepTermsAcceptedAt) await DB.setSetting('termsAcceptedAt', keepTermsAcceptedAt);
         // Restore localStorage preferences
         if (data._prefs) {
           if (data._prefs.lang) localStorage.setItem('lang', data._prefs.lang);
@@ -6715,9 +6783,17 @@
 
     $('#reset-data').addEventListener('click', async () => {
       if (!confirm(t('confirm_delete'))) return;
-      if (!confirm('Διαγραφή ΟΛΩΝ; Δεν μπορεί να αναιρεθεί!')) return;
+      if (!confirm('Διαγραφή ΟΛΩΝ των εγγραφών (πελάτες, οχήματα, service, εντολές, ραντεβού); Δεν μπορεί να αναιρεθεί! Ο λογαριασμός σας ΔΕΝ θα απενεργοποιηθεί.')) return;
+      // resetAll() clears every IndexedDB store, including the one that holds
+      // workshopId/workshopMode — without this, clearing test/demo records
+      // would silently log a paying customer out of their activated account.
+      const keepWorkshopId = state.settings.workshopId;
+      const keepWorkshopMode = state.settings.workshopMode;
+      const keepTermsAcceptedAt = state.settings.termsAcceptedAt;
       await DB.resetAll();
-      localStorage.clear();
+      if (keepWorkshopId) await DB.setSetting('workshopId', keepWorkshopId);
+      if (keepWorkshopMode) await DB.setSetting('workshopMode', keepWorkshopMode);
+      if (keepTermsAcceptedAt) await DB.setSetting('termsAcceptedAt', keepTermsAcceptedAt);
       location.reload();
     });
   }
@@ -6982,9 +7058,26 @@
     // ΚΤΕΟ / emissions alerts (vehicles expiring within 14 days)
     checkKteoAlerts();
 
-    // Register service worker
+    // Register service worker, and prompt for a refresh when a new one takes
+    // over. sw.js calls skipWaiting()/clients.claim() so a new version
+    // activates without waiting for this tab to close — but that only swaps
+    // which SW answers future network requests; it does nothing to the
+    // already-running in-memory app.js, which would otherwise keep executing
+    // old code indefinitely on a workshop's all-day-open installed app.
     if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-      navigator.serviceWorker.register('./sw.js').catch(() => {});
+      const hadController = !!navigator.serviceWorker.controller;
+      navigator.serviceWorker.register('./sw.js').then((reg) => {
+        reg.update().catch(() => {});
+        setInterval(() => reg.update().catch(() => {}), 60 * 60 * 1000); // hourly while open
+      }).catch(() => {});
+
+      let refreshed = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (refreshed) return;
+        refreshed = true;
+        if (!hadController) return; // first-ever activation, not an update
+        showUpdateBanner();
+      });
     }
 
     // Install prompt

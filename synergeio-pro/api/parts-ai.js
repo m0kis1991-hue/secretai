@@ -36,8 +36,13 @@ module.exports = async function handler(req, res) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(503).json({ error: 'AI not configured on server' });
 
-  const body = req.body || {};
-  const parsed = typeof body === 'string' ? JSON.parse(body) : body;
+  let parsed;
+  try {
+    const body = req.body || {};
+    parsed = typeof body === 'string' ? JSON.parse(body) : body;
+  } catch (_) {
+    return res.status(400).json({ error: 'Μη έγκυρα δεδομένα αίτησης' });
+  }
   const { task, brand, model, year, engine, fuel } = parsed;
   if (!task) return res.status(400).json({ error: 'Missing task' });
 

@@ -25,6 +25,10 @@ module.exports = async function handler(req, res) {
       headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}` },
     });
     const data = await resp.json();
+    if (!resp.ok) {
+      console.error('admin-usage list error:', JSON.stringify(data));
+      return res.status(resp.status).json({ error: data?.message || 'Αποτυχία φόρτωσης στατιστικών' });
+    }
     return res.status(200).json(Array.isArray(data) ? data : []);
   } catch (e) {
     console.error('admin-usage error:', e);
