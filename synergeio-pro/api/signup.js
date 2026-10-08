@@ -43,9 +43,17 @@ async function verifyGoogleCredential(credential) {
 // configured yet, or if session creation fails for any reason — signup
 // itself must never fail just because Stripe had a hiccup; the admin can
 // always activate manually as before.
-async function createStripeCheckoutSession({ clientId, workshopId, email, stripeCustomerId }) {
+async function createStripeCheckoutSession({ clientId, workshopId, email, stripeCustomerId, plan }) {
   const secretKey = process.env.STRIPE_SECRET_KEY;
-  const priceId = process.env.STRIPE_PRICE_ID;
+  // Never silently substitute the monthly price for a customer who picked
+  // yearly (or vice versa) just because the matching env var isn't set —
+  // that would charge a different amount/cadence than what they agreed to.
+  // Fail closed instead: no checkout link rather than the wrong one.
+  if (plan === 'yearly' && !process.env.STRIPE_PRICE_ID_YEARLY) {
+    console.error('createStripeCheckoutSession: yearly plan requested but STRIPE_PRICE_ID_YEARLY is not set');
+    return null;
+  }
+  const priceId = plan === 'yearly' ? process.env.STRIPE_PRICE_ID_YEARLY : process.env.STRIPE_PRICE_ID;
   if (!secretKey || !priceId) return null;
 
   const base = (process.env.PUBLIC_APP_URL || 'https://synergeio-pro.vercel.app').replace(/\/$/, '');
@@ -124,6 +132,7 @@ module.exports = async function handler(req, res) {
 
   const workshopName = (body.workshop_name || '').toString().trim().slice(0, 120);
   const phone = (body.phone || '').toString().trim().slice(0, 30);
+  const plan = body.plan === 'yearly' ? 'yearly' : 'monthly';
 
   // Two signup paths: a verified Google identity (contact_name/email come
   // from Google, never trusted from the client), or plain form fields.
@@ -180,6 +189,7 @@ module.exports = async function handler(req, res) {
           clientId: created.id,
           workshopId: created.workshop_id,
           email,
+          plan,
         });
         return res.status(201).json({ workshopId: created.workshop_id, workshopName: created.workshop_name, checkoutUrl });
       }

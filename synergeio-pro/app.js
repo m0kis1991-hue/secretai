@@ -5515,7 +5515,6 @@
           }
           await DB.setSetting('workshopId', code);
           await DB.setSetting('termsAcceptedAt', new Date().toISOString());
-          try { localStorage.setItem('gl_has_account', '1'); } catch (_) {}
           state.settings.workshopId = code;
           if (data.superadmin) {
             await DB.setSetting('workshopMode', 'admin');
@@ -5538,7 +5537,7 @@
 
       submitBtn.addEventListener('click', tryActivate);
       codeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') tryActivate(); });
-      el.querySelector('#act-goto-signup').addEventListener('click', renderSignupView);
+      el.querySelector('#act-goto-signup').addEventListener('click', () => renderSignupView());
       demoBtn.addEventListener('click', async () => {
         if (!termsAccepted) { errEl.textContent = 'Πρέπει να αποδεχτείτε τους Όρους Χρήσης και την Πολιτική Απορρήτου.'; return; }
         if (state.settings.workshopId && state.settings.workshopMode !== 'demo') {
@@ -5549,7 +5548,6 @@
         const localId = 'ws_demo_' + Date.now().toString(36);
         await DB.setSetting('workshopId', localId);
         await DB.setSetting('workshopMode', 'demo');
-        try { localStorage.setItem('gl_has_account', '1'); } catch (_) {}
         await DB.setSetting('termsAcceptedAt', new Date().toISOString());
         state.settings.workshopId = localId;
         state.settings.workshopMode = 'demo';
@@ -5561,8 +5559,15 @@
       });
     }
 
-    function renderSignupView() {
+    function renderSignupView(initialPlan) {
       let googleCredential = null;
+      const yearlyPreselected = initialPlan === 'yearly';
+      // Single source of truth for the selected/unselected plan-card look, so
+      // the initial render and the change-listener restyle can never diverge.
+      function planCardStyle(active, extra) {
+        return `flex:1;cursor:pointer;border-radius:0.5rem;padding:0.625rem;text-align:center;${extra || ''}` +
+          (active ? 'border:1.5px solid #3b82f6;background:rgba(59,130,246,0.1);' : 'border:1.5px solid #475569;background:transparent;');
+      }
 
       el.innerHTML = box(`
         <img src="icon-192.png" style="width:64px;height:64px;border-radius:1rem;margin:0 auto 0.75rem;" />
@@ -5580,6 +5585,21 @@
           style="width:100%;box-sizing:border-box;background:#0f172a;border:1.5px solid #475569;border-radius:0.5rem;color:white;padding:0.7rem 0.9rem;font-size:0.9rem;outline:none;margin-bottom:0.5rem;" />
         <input id="su-website" type="text" autocomplete="off" tabindex="-1"
           style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;" />
+
+        <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem;">
+          <label id="plan-monthly-card" style="${planCardStyle(!yearlyPreselected)}">
+            <input type="radio" name="plan" value="monthly" ${yearlyPreselected ? '' : 'checked'} style="display:none;" />
+            <div style="color:white;font-weight:700;font-size:0.9375rem;">25€<span style="font-size:0.7rem;color:#94a3b8;">/μήνα</span></div>
+            <div style="color:#94a3b8;font-size:0.6875rem;">Μηνιαία συνδρομή</div>
+          </label>
+          <label id="plan-yearly-card" style="${planCardStyle(yearlyPreselected, 'position:relative;')}">
+            <span style="position:absolute;top:-0.5rem;right:0.375rem;background:#059669;color:white;font-size:0.5625rem;font-weight:700;padding:0.125rem 0.375rem;border-radius:9999px;">-17%</span>
+            <input type="radio" name="plan" value="yearly" ${yearlyPreselected ? 'checked' : ''} style="display:none;" />
+            <div style="color:white;font-weight:700;font-size:0.9375rem;">250€<span style="font-size:0.7rem;color:#94a3b8;">/έτος</span></div>
+            <div style="color:#94a3b8;font-size:0.6875rem;">2 μήνες δωρεάν</div>
+          </label>
+        </div>
+
         <div id="su-err" style="color:#f87171;font-size:0.8125rem;min-height:1.2rem;margin-bottom:0.5rem;"></div>
         ${termsCheckbox('su-terms')}
         <button id="su-submit" disabled style="width:100%;background:#1d4ed8;opacity:0.5;color:white;padding:0.75rem;border-radius:0.5rem;border:none;font-size:0.9375rem;font-weight:600;cursor:not-allowed;margin-bottom:0.625rem;">
@@ -5655,10 +5675,18 @@
         nameInput.focus();
       }
 
+      el.querySelectorAll('input[name="plan"]').forEach((radio) => {
+        radio.addEventListener('change', () => {
+          el.querySelector('#plan-monthly-card').style.cssText = planCardStyle(radio.value === 'monthly');
+          el.querySelector('#plan-yearly-card').style.cssText = planCardStyle(radio.value === 'yearly', 'position:relative;');
+        });
+      });
+
       async function trySignup() {
         if (!termsAccepted) { errEl.textContent = 'Πρέπει να αποδεχτείτε τους Όρους Χρήσης και την Πολιτική Απορρήτου.'; return; }
         const workshopName = (nameInput.value || '').trim();
         const phone = (phoneInput.value || '').trim();
+        const plan = el.querySelector('input[name="plan"]:checked')?.value === 'yearly' ? 'yearly' : 'monthly';
         if (!workshopName) { errEl.textContent = 'Το όνομα συνεργείου είναι υποχρεωτικό.'; return; }
         if (!phone) { errEl.textContent = 'Το τηλέφωνο είναι υποχρεωτικό.'; return; }
         submitBtn.disabled = true;
@@ -5673,12 +5701,14 @@
               phone,
               google_credential: googleCredential,
               website: websiteInput.value,
+              plan,
             } : {
               workshop_name: workshopName,
               contact_name: (contactInput.value || '').trim(),
               phone,
               email: (emailInput.value || '').trim(),
               website: websiteInput.value,
+              plan,
             }),
           });
           const data = await resp.json().catch(() => null);
@@ -5691,7 +5721,6 @@
           await DB.setSetting('workshopId', data.workshopId);
           await DB.setSetting('workshopMode', 'licensed');
           await DB.setSetting('termsAcceptedAt', new Date().toISOString());
-          try { localStorage.setItem('gl_has_account', '1'); } catch (_) {}
           state.settings.workshopId = data.workshopId;
           if (data.checkoutUrl) {
             // Stripe is configured — pay now and activate immediately instead
@@ -5731,7 +5760,15 @@
       });
     }
 
-    renderCodeView();
+    // Coming from the landing page's pricing section (app.html?plan=yearly) —
+    // skip straight to the signup form with that plan already selected,
+    // instead of discarding the visitor's choice and defaulting to monthly.
+    const requestedPlan = new URLSearchParams(location.search).get('plan');
+    if (requestedPlan === 'yearly' || requestedPlan === 'monthly') {
+      renderSignupView(requestedPlan);
+    } else {
+      renderCodeView();
+    }
   }
 
   function showDemoBanner() {

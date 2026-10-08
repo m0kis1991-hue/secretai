@@ -91,6 +91,40 @@ async function handleLicenseCheck(req, res) {
   }
 }
 
+// Returns 'monthly' | 'yearly' | null. null means "couldn't determine" —
+// distinct from a confirmed 'monthly', so a transient Stripe API hiccup can
+// never silently masquerade as "this was always a monthly subscription" and
+// slip past the fail-closed check in createStripeCheckoutSession.
+async function inferPlanFromSubscription(subscriptionId) {
+  const secretKey = process.env.STRIPE_SECRET_KEY;
+  if (!subscriptionId) return 'monthly'; // nothing to look up — no prior subscription on file
+  if (!secretKey) return null;
+  try {
+    const resp = await fetch(`https://api.stripe.com/v1/subscriptions/${encodeURIComponent(subscriptionId)}`, {
+      headers: { Authorization: `Bearer ${secretKey}` },
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      console.error('inferPlanFromSubscription lookup failed:', JSON.stringify(data));
+      return null;
+    }
+    // Match by our own known price IDs rather than assuming a single line
+    // item at index 0 — robust even if a subscription ever gets a second,
+    // manually-added line item (e.g. an add-on charged via the Stripe Dashboard).
+    const items = data?.items?.data || [];
+    const yearlyPriceId = process.env.STRIPE_PRICE_ID_YEARLY;
+    const monthlyPriceId = process.env.STRIPE_PRICE_ID;
+    if (yearlyPriceId && items.some((it) => it.price?.id === yearlyPriceId)) return 'yearly';
+    if (monthlyPriceId && items.some((it) => it.price?.id === monthlyPriceId)) return 'monthly';
+    // Fallback: neither known price ID matched (shouldn't normally happen) — go by interval.
+    const interval = items[0]?.price?.recurring?.interval;
+    return interval === 'year' ? 'yearly' : 'monthly';
+  } catch (e) {
+    console.error('inferPlanFromSubscription error:', e);
+    return null;
+  }
+}
+
 // Lets an already-registered but inactive (unpaid/frozen) account get a
 // fresh Stripe Checkout link to pay immediately, without admin involvement.
 // Reuses the same session-creation logic as a brand-new signup.
@@ -103,7 +137,7 @@ async function handleRetryPayment(req, res, body) {
   }
   try {
     const resp = await fetch(
-      `${supabaseUrl}/rest/v1/gearlog_clients?workshop_id=eq.${encodeURIComponent(workshopId)}&select=id,email,is_active,stripe_customer_id`,
+      `${supabaseUrl}/rest/v1/gearlog_clients?workshop_id=eq.${encodeURIComponent(workshopId)}&select=id,email,is_active,stripe_customer_id,stripe_subscription_id`,
       { headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` } }
     );
     const data = await resp.json();
@@ -115,8 +149,18 @@ async function handleRetryPayment(req, res, body) {
     if (!client) return res.status(404).json({ error: 'Δεν βρέθηκε ο λογαριασμός' });
     if (client.is_active) return res.status(400).json({ error: 'Ο λογαριασμός είναι ήδη ενεργός' });
 
+    // Re-use whatever billing cadence (monthly/yearly) the customer originally
+    // picked, read back from their actual Stripe subscription — never assume
+    // "monthly" just because it's the default, or a yearly subscriber retrying
+    // after a lapse would get quietly re-billed at the wrong price/interval.
+    const plan = await inferPlanFromSubscription(client.stripe_subscription_id);
+    if (plan === null) {
+      return res.status(503).json({ error: 'Δεν ήταν δυνατή η επιβεβαίωση του πλάνου συνδρομής. Δοκιμάστε ξανά σε λίγο ή επικοινωνήστε με τον πάροχο.' });
+    }
+
     const { createStripeCheckoutSession } = require('./signup.js');
     const checkoutUrl = await createStripeCheckoutSession({
+      plan,
       clientId: client.id,
       workshopId,
       email: client.email,

@@ -16,9 +16,7 @@
 <style>
   html, body { height: 100%; }
   body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  html { visibility: hidden; }
 </style>
-<noscript><style>html { visibility: visible !important; }</style></noscript>
 </head>
 <body class="bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100">
 
@@ -90,6 +88,35 @@
     </div>
   </section>
 
+  <!-- Pricing -->
+  <section class="max-w-4xl mx-auto px-5 py-10">
+    <div class="text-center mb-8">
+      <h2 class="text-2xl font-bold mb-2">Τιμολόγηση</h2>
+      <p class="text-slate-500 dark:text-slate-400">Απλή, διαφανής τιμή. Ακύρωση όποτε θέλεις.</p>
+    </div>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-5 max-w-2xl mx-auto">
+      <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 flex flex-col">
+        <div class="text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1">Μηνιαία</div>
+        <div class="flex items-end gap-1 mb-1">
+          <span class="text-4xl font-extrabold">25€</span>
+          <span class="text-slate-400 mb-1">/μήνα</span>
+        </div>
+        <p class="text-sm text-slate-500 dark:text-slate-400 mb-5">Πλήρης πρόσβαση σε όλες τις λειτουργίες.</p>
+        <a href="app.html?plan=monthly" class="mt-auto bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-100 font-semibold py-2.5 rounded-xl text-center transition-colors">Επιλογή</a>
+      </div>
+      <div class="bg-white dark:bg-slate-800 border-2 border-blue-500 rounded-2xl p-6 flex flex-col relative">
+        <span class="absolute -top-3 right-5 bg-emerald-500 text-white text-xs font-bold px-3 py-1 rounded-full">2 μήνες δωρεάν</span>
+        <div class="text-sm font-semibold text-blue-600 dark:text-blue-400 mb-1">Ετήσια</div>
+        <div class="flex items-end gap-1 mb-1">
+          <span class="text-4xl font-extrabold">250€</span>
+          <span class="text-slate-400 mb-1">/έτος</span>
+        </div>
+        <p class="text-sm text-slate-500 dark:text-slate-400 mb-5">Ισοδύναμο με 20,8€/μήνα — πλήρης πρόσβαση.</p>
+        <a href="app.html?plan=yearly" class="mt-auto bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 rounded-xl text-center transition-colors">Επιλογή</a>
+      </div>
+    </div>
+  </section>
+
   <!-- Bottom CTA -->
   <section class="max-w-3xl mx-auto px-5 py-14 text-center">
     <h2 class="text-2xl font-bold mb-3">Έτοιμος να ξεκινήσεις;</h2>
@@ -121,47 +148,12 @@
   </div>
 
   <script>
-    // Existing users (already have a local workshop profile) skip the marketing
-    // page entirely and go straight into the app — this page is only for new visitors.
-    (function () {
-      function reveal() { document.documentElement.style.visibility = 'visible'; }
-      function goToApp() { location.replace('app.html' + location.hash); }
-
-      try {
-        if (localStorage.getItem('gl_has_account')) { goToApp(); return; }
-      } catch (_) {}
-
-      // Backfill for accounts created before this flag existed: only OPEN the
-      // database if indexedDB.databases() confirms it's already there — never
-      // create it here, or we'd pre-empt db.js's own onupgradeneeded and leave
-      // a brand-new visitor with an empty, un-initialized schema.
-      var settled = false;
-      function finish(isUser) {
-        if (settled) return;
-        settled = true;
-        if (isUser) { try { localStorage.setItem('gl_has_account', '1'); } catch (_) {} goToApp(); }
-        else reveal();
-      }
-      setTimeout(function () { finish(false); }, 1500); // safety net
-
-      if (window.indexedDB && typeof indexedDB.databases === 'function') {
-        indexedDB.databases().then(function (dbs) {
-          if (!dbs.some(function (d) { return d.name === 'synergeio_pro'; })) return finish(false);
-          var req = indexedDB.open('synergeio_pro'); // no version → never upgrades/creates
-          req.onsuccess = function (e) {
-            var db = e.target.result;
-            if (!db.objectStoreNames.contains('settings')) { db.close(); return finish(false); }
-            var g = db.transaction('settings', 'readonly').objectStore('settings').get('workshopId');
-            g.onsuccess = function () { db.close(); finish(!!(g.result && g.result.value)); };
-            g.onerror = function () { db.close(); finish(false); };
-          };
-          req.onerror = function () { finish(false); };
-          req.onblocked = function () { finish(false); };
-        }).catch(function () { finish(false); });
-      } else {
-        finish(false); // browser without indexedDB.databases() (older Safari) — show the landing page
-      }
-    })();
+    // This page always shows first, for every visitor — including returning
+    // ones. Signing in is a deliberate click on "Σύνδεση / Εγγραφή", not an
+    // automatic redirect based on remembered local state (an earlier version
+    // auto-skipped straight to the app for anyone with local data, which
+    // meant the link never actually showed the marketing page to repeat
+    // visitors — the opposite of what a shareable marketing link should do).
 
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js').catch(() => {});
